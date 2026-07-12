@@ -61,15 +61,31 @@ def extract_wikilinks(body: str) -> list[str]:
 
 
 def wikify(text: str, entities: list[str]) -> str:
-    """Wraps the first occurrence of each entity name in [[...]], longest
-    names first so "Project X Alpha" links whole before "Project X" can
-    split it. Occurrences already inside a wikilink are left alone."""
+    """Wraps the first occurrence of each entity name in [[slug|Display Name]],
+    longest names first so "Project X Alpha" links whole before "Project X"
+    can split it. Occurrences already inside a wikilink are left alone.
+
+    Aliased to the slug rather than a bare [[Display Name]] because Obsidian
+    resolves wikilinks against filenames — it's case-insensitive but does NOT
+    turn spaces into hyphens, so a bare [[Iron Temple]] never resolves to
+    entities/iron-temple.md and renders as a phantom unresolved node instead
+    of the real one, even though nothing about the underlying data is wrong
+    (vault.expand_links/read_note already slugify before comparing). The
+    alias form points Obsidian at the real file while still displaying the
+    natural name.
+    """
     for entity in sorted(entities, key=len, reverse=True):
         pattern = re.compile(
             # not already inside brackets: no [[ immediately before, no ]] after
             r"(?<!\[\[)" + re.escape(entity) + r"(?!\]\])(?![^\[]*\]\])"
         )
-        text = pattern.sub(f"[[{entity}]]", text, count=1)
+        # Obsidian's own link resolution is case-insensitive, so a plain
+        # case difference ("Sarah" -> sarah.md) still resolves fine bare.
+        # Only alias when slugify changed something case-insensitivity
+        # wouldn't cover — spaces, punctuation, accents.
+        slug = slugify(entity)
+        replacement = f"[[{entity}]]" if slug == entity.lower() else f"[[{slug}|{entity}]]"
+        text = pattern.sub(replacement, text, count=1)
     return text
 
 

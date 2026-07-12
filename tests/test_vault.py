@@ -21,14 +21,38 @@ def test_write_scene_creates_obsidian_compatible_note_with_wikilinks():
 
     raw = path.read_text(encoding="utf-8")
     assert raw.startswith("---\n")
-    assert "[[deadlock]]" in raw
-    assert "[[Project X]]" in raw
+    assert "[[deadlock]]" in raw  # single word, case-insensitive resolution covers it
+    assert "[[project-x|Project X]]" in raw  # multi-word needs the slug alias
 
     note = vault.read_note("t1", "u1", "Debugging the async scraper")
     assert note is not None
     fm, body = note
     assert fm["id"] == "scene_1"
     assert fm["source_ids"] == ["m1", "m2"]
+
+
+def test_multiword_entity_wikilink_target_matches_its_own_stub_filename():
+    """Regression for a bug caught live via an actual Obsidian screenshot:
+    a scene mentioning "Iron Temple" wikified as bare [[Iron Temple]] never
+    resolved to entities/iron-temple.md in Obsidian (it normalizes case but
+    not spaces-to-hyphens), rendering as a phantom unresolved node duplicate
+    of the real, resolved "iron-temple" node. The wikilink target actually
+    written into the note must equal the entity stub's own slug.
+    """
+    from app.core import okf
+
+    path = vault.write_scene(
+        "t1", "u1", "scene_1", "s1", "Deadlift day",
+        body="Coached by Vikram at Iron Temple.",
+        entities=["Vikram", "Iron Temple"], source_ids=[],
+    )
+
+    raw = path.read_text(encoding="utf-8")
+    targets = okf.extract_wikilinks(raw)
+
+    stub_path = vault.ensure_entity_stub("t1", "u1", "Iron Temple")
+    assert okf.slugify(stub_path.stem) in targets, "wikilink target must match the real file's slug"
+    assert "Iron Temple" in raw, "the human-readable name must still be visible as display text"
 
 
 def test_write_scene_creates_entity_stubs_so_no_dangling_links():

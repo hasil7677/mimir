@@ -50,7 +50,7 @@ def test_capture_then_session_end_produces_an_obsidian_note(tmp_path):
     assert len(scene_files) == 1
     raw = scene_files[0].read_text(encoding="utf-8")
     assert raw.startswith("---\n")
-    assert "[[Project X]]" in raw
+    assert "[[project-x|Project X]]" in raw  # aliased so Obsidian resolves it, not a phantom node
 
 
 def test_vault_note_endpoint_returns_note_with_linked_context():
