@@ -1,0 +1,99 @@
+"""Turning raw session turns into an OKF scene note.
+
+Two paths, one contract:
+  - LLM path: proper prose synthesis (any OpenAI-compatible endpoint, incl. Ollama).
+  - Offline digest path: deterministic, no network, no models — because the
+    local-first principle says capture must never be blocked on an LLM being
+    reachable. A digest scene is honest about what it is (frontmatter-visible
+    `synthesis: digest`) and can be re-synthesized later when an LLM exists.
+"""
+
+import json
+import re
+
+from app.core.llm import LlmUnavailable, chat
+
+# Words that start sentences and look like names but aren't entities.
+_STOPWORDS = {
+    "The", "This", "That", "These", "Those", "There", "Then", "They",
+    "A", "An", "And", "But", "Or", "So", "If", "When", "While", "After",
+    "I", "It", "He", "She", "We", "You", "My", "Our", "His", "Her",
+    "What", "Which", "Who", "How", "Why", "Where", "Yes", "No", "Not",
+    "User", "Assistant", "Also", "Just", "Now", "Today", "Yesterday",
+}
+
+_CAPITALIZED_RUN = re.compile(r"\b([A-Z][a-zA-Z0-9]*(?:\s+[A-Z][a-zA-Z0-9]*)*)\b")
+
+_SCENE_PROMPT = """You are turning a conversation into a memory note.
+
+Conversation:
+{transcript}
+
+Return ONLY a JSON object:
+{{"title": "short scene title", "summary": "2-5 sentence factual summary in markdown",
+  "entities": ["proper nouns / named things worth linking"]}}
+"""
+
+
+_SENTENCE_START = re.compile(r"(?:\A|[.!?]\s+|\n\s*)$")
+
+
+def extract_entities_naive(text: str) -> list[str]:
+    """Offline entity guesser: runs of Capitalized Words, minus stopwords,
+    minus the sentence-start trap — a lone capitalized word opening a sentence
+    ("Huge! ...", "Smooth. ...") is almost always just English, so it only
+    counts if the same word also shows up capitalized mid-sentence somewhere.
+    Deliberately conservative: a missed entity is a missing wikilink
+    (harmless), a false one is a junk note in the user's vault. spaCy
+    replaces this in the graph phase; the interface stays the same."""
+    mid_sentence_words: set[str] = set()
+    candidates: list[tuple[str, bool]] = []  # (run, at_sentence_start)
+
+    for match in _CAPITALIZED_RUN.finditer(text):
+        at_start = bool(_SENTENCE_START.search(text[: match.start()]))
+        candidates.append((match.group(1), at_start))
+        if not at_start:
+            mid_sentence_words.update(match.group(1).split())
+
+    entities: list[str] = []
+    for run, at_start in candidates:
+        words = [w for w in run.split() if w not in _STOPWORDS]
+        if not words:
+            continue
+        if at_start and len(words) == 1 and words[0] not in mid_sentence_words:
+            continue
+        cleaned = " ".join(words)
+        if len(cleaned) >= 3 and any(len(w) > 2 for w in words) and cleaned not in entities:
+            entities.append(cleaned)
+    return entities
+
+
+def _digest_scene(turns: list[dict]) -> tuple[str, str, list[str]]:
+    first_user = next((t for t in turns if t.get("role") == "user"), turns[0])
+    title = first_user["content"].strip().splitlines()[0][:60]
+
+    lines = [f"- **{t.get('role', 'user')}**: {t['content'].strip()}" for t in turns]
+    body = "## Transcript digest\n\n" + "\n".join(lines)
+
+    entities: list[str] = []
+    for t in turns:
+        for e in extract_entities_naive(t["content"]):
+            if e not in entities:
+                entities.append(e)
+    return title, body, entities
+
+
+def synthesize_scene(turns: list[dict]) -> tuple[str, str, list[str], str]:
+    """-> (title, body, entities, mode) where mode is 'llm' or 'digest'."""
+    transcript = "\n".join(f"{t.get('role', 'user')}: {t['content']}" for t in turns)
+    try:
+        raw = chat(_SCENE_PROMPT.format(transcript=transcript), max_tokens=600)
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        data = json.loads(match.group(0) if match else raw)
+        title = str(data["title"]).strip()[:80]
+        body = str(data["summary"]).strip()
+        entities = [str(e).strip() for e in data.get("entities", []) if str(e).strip()]
+        return title, body, entities, "llm"
+    except (LlmUnavailable, json.JSONDecodeError, KeyError, AttributeError):
+        title, body, entities = _digest_scene(turns)
+        return title, body, entities, "digest"

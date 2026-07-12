@@ -1,0 +1,80 @@
+server:
+  port: 8080
+  host: "127.0.0.1"
+  api_key: ""
+  cors_origins: []
+
+storage:
+  backend: "full"  # "full" (Redis+Qdrant+KuZu+DuckDB) | "lite" (SQLite+sqlite-vec)
+
+  redis:
+    url: "redis://localhost:6379"
+    hot_ttl_hours: 24
+    cache_ttl_hours: 6
+    freq_ttl_days: 30
+
+  qdrant:
+    mode: "local"  # "local" (embedded) | "server"
+    path: "~/.mimir/qdrant"
+    collection_name: "l1_memories"
+
+  kuzu:
+    path: "~/.mimir/kuzu"
+
+  duckdb:
+    path: "~/.mimir/memories.db"
+
+embedding:
+  provider: "openai"  # "openai" | "local" | "none"
+  base_url: "https://api.openai.com/v1"
+  api_key: "${OPENAI_API_KEY}"
+  model: "text-embedding-3-small"
+  dimensions: 1536
+
+llm:
+  provider: "openai"
+  base_url: "https://api.openai.com/v1"
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o-mini"
+  extraction_model: ""
+  timeout_ms: 30000
+
+pipeline:
+  l1_every_n_turns: 5
+  l1_idle_timeout_seconds: 600
+  l2_every_n_memories: 20
+  l3_every_n_memories: 50
+  enable_warmup: true
+
+recall:
+  strategy: "hybrid"  # "hybrid" | "vector" | "keyword" | "graph"
+  max_results: 5
+  recall_threshold: 0.30
+  cache_threshold: 0.92
+  max_context_chars: 4000
+  weights:
+    semantic: 0.45
+    frequency: 0.20
+    recency: 0.25
+    graph: 0.10
+  decay_rate: 0.05
+
+extraction:
+  max_memories_per_session: 20
+  min_priority: 50
+  enable_dedup: true
+  enable_entity_extraction: true
+
+capture:
+  l0_retention_days: 0
+  exclude_agents: []
+
+# Pro only:
+pii:
+  enabled: false
+  types: ["EMAIL", "PHONE", "SSN", "CREDIT_CARD"]
+  strategy: "mask"
+
+compliance:
+  audit_log_enabled: false
+  data_residency: "local"
