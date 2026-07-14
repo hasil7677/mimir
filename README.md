@@ -1,4 +1,4 @@
-<div align="center">
+     <div align="center">
 
 # Mimir
 
@@ -51,7 +51,7 @@ Full diagrams and a module-by-module walkthrough: **[docs/ARCHITECTURE.md](docs/
 
 ```bash
 git clone https://github.com/hasil7677/mimir.git
-cd mimir/engine
+cd mimir
 pip install -e ".[dev]"
 uvicorn app.main:app --port 8080
 ```
