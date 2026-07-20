@@ -33,6 +33,12 @@ dev = [
     "pytest>=8.3.3",
     "fakeredis>=2.25.0",
 ]
+# Not a core dependency on purpose — "every dependency is an upgrade, never a
+# requirement" applies here too. embed_hybrid() degrades to EmbeddingsUnavailable
+# if this isn't installed, same as any other missing/unconfigured provider.
+fastembed = [
+    "fastembed>=0.3.0",
+]
 
 [build-system]
 requires = ["hatchling"]

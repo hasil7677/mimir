@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.core import consolidation, extraction, persona, semantic_cache, synthesis, vault
-from app.core.embeddings import EmbeddingsUnavailable, embed
+from app.core.embeddings import EmbeddingsUnavailable, embed, embed_hybrid, supports_hybrid
 from app.db import duckdb_client, l1_store, redis_client, vector_store
 
 logger = logging.getLogger(__name__)
@@ -75,8 +75,12 @@ def flush_session(tenant_id: str, user_id: str, session_id: str) -> dict | None:
     vector_indexed = False
     if facts:
         try:
-            vectors = embed([f["content"] for f in facts])
-            vector_store.upsert_facts(tenant_id, user_id, facts, vectors)
+            if supports_hybrid():
+                embeddings = embed_hybrid([f["content"] for f in facts])
+                vector_store.upsert_facts_hybrid(tenant_id, user_id, facts, embeddings)
+            else:
+                vectors = embed([f["content"] for f in facts])
+                vector_store.upsert_facts(tenant_id, user_id, facts, vectors)
             vector_indexed = True
         except EmbeddingsUnavailable:
             logger.info("embeddings unavailable — facts stored keyword-searchable only")

@@ -5,3 +5,4 @@ __pycache__/
 mimir.yaml
 *.duckdb
 .mimir/
+HANDOFF.md

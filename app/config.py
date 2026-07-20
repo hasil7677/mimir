@@ -54,11 +54,26 @@ class StorageConfig(BaseModel):
 
 
 class EmbeddingConfig(BaseModel):
-    provider: str = "openai"  # "openai" | "local" | "none"
+    # Defaults to "none" deliberately: out of the box, with no config file and
+    # no key, this must make zero outbound network calls. "openai" only
+    # activates once someone explicitly sets a key (or points base_url at a
+    # local Ollama instance); "fastembed" only activates once someone
+    # explicitly opts in too — its first use downloads model weights (a
+    # one-time, anonymous file fetch, no user content sent), so it's a
+    # deliberate choice, never a silent default that phones home either.
+    provider: str = "none"  # "openai" | "local" | "fastembed" | "none"
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = "text-embedding-3-small"
     dimensions: int = 1536
+
+    # fastembed only: runs fully in-process (ONNX), no server, no API key.
+    # Dense model powers semantic search; sparse model is Qdrant's own BM25
+    # implementation, which is what makes Qdrant's native hybrid fusion
+    # possible instead of hand-rolling our own BM25 + RRF merge.
+    fastembed_dense_model: str = "BAAI/bge-small-en-v1.5"
+    fastembed_sparse_model: str = "Qdrant/bm25"
+    fastembed_cache_dir: str = "~/.mimir/models"
 
 
 class LlmConfig(BaseModel):
