@@ -1,4 +1,5 @@
 
+<div align="center">
 
 # Mimir
 
@@ -61,7 +62,7 @@ That's it — `GET /health` works with zero config. No `mimir.yaml`, no Redis, n
 ## Use it from Claude Code (or any MCP client) right now
 
 ```bash
-claude mcp add mimir --scope user -e MIMIR_USER_ID=you -- python /path/to/mimir/engine/adapters/mcp_embedded.py
+claude mcp add mimir --scope user -e MIMIR_USER_ID=you -- python /path/to/mimir/adapters/mcp_embedded.py
 ```
 
 No gateway to run — the embedded adapter imports the engine directly, so a process only exists while your agent session is open. Three tools show up: `mimir_recall`, `mimir_remember`, `mimir_flush`. Point your `CLAUDE.md` at them and your agent starts building a memory of you, one conversation at a time.
@@ -72,7 +73,7 @@ Also documented: OpenCode (native MCP), Pi (via the community `pi-mcp-adapter`),
 
 This is early — built fast, tested hard, not yet battle-tested by anyone but me. Here's the honest split:
 
-**Solid and tested (83 tests — 80 pass with zero services running, 3 need a live Redis — real HTTP layer, real filesystem, real dedup logic):**
+**Solid and tested (102 tests — 99 pass with zero services running, 3 need a live Redis — real HTTP layer, real filesystem, real dedup logic):**
 hybrid recall with a 4-signal scoring formula · semantic caching with measured cache hits · L1.5 fact consolidation (exact-dup detection needs zero LLM calls; an LLM present gets you store/skip/supersede/contradiction-flag decisions, with hallucinated target IDs rejected) · GDPR-style erasure and export across every store · a self-healing recovery path for orphaned sessions (found live, fixed same day — see the commit log if you want to watch that happen) · MCP support verified end-to-end inside real Claude Code sessions.
 
 **Known gaps, not hidden:**
@@ -91,20 +92,13 @@ If you're looking for something production-hardened with a support contract, thi
 |---|---|
 | Mimir | **43.3%** (255/589) |
 
-First number at real benchmark scale, not a cherry-picked sample. Actively working on closing the gap — see Known gaps above.
-
-Two smaller, informal local comparisons against mem0 and TencentDB Agent Memory (own harness, small samples — directional, not final):
-
-| Benchmark | Sample | Mimir | mem0 | TencentDB |
-|---|---|---|---|---|
-| LongMemEval-S | 6 questions | 3/6 | ~2/6 | 0/6 |
-| PersonaMem/32k | 7 questions | 4/7 (57%) | 2/7 (29%) | 3/7 (43%) |
+First number at real benchmark scale, not a cherry-picked sample. See the [live leaderboard](https://agentmemorybenchmark.ai) for how this compares to other systems on the same split. Actively working on closing the gap — see Known gaps above.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest              # 83 tests; Redis-backed ones auto-skip without a server
+pytest              # 102 tests; Redis-backed ones auto-skip without a server
 ```
 
 CI runs the suite on Python 3.11–3.13, on both Ubuntu and Windows — the Windows leg is not decorative, it's what caught a real timezone bug during development.
