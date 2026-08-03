@@ -52,23 +52,31 @@ def consolidate(tenant_id: str, user_id: str, new_facts: list[dict]) -> list[dic
     if not new_facts:
         return []
 
-    # Candidate pool: keyword-nearest existing memories per new fact, unified.
+    # Candidate pool: keyword-nearest existing memories per new fact. `candidates`
+    # unions them all for the prompt (one batched call), but `fact_candidate_ids`
+    # keeps each new fact's OWN candidate set too — see below for why that's
+    # load-bearing, not just bookkeeping.
     candidates: dict[str, dict] = {}
+    fact_candidate_ids: list[set[str]] = []
     for fact in new_facts:
-        for hit in l1_store.search_keyword(tenant_id, user_id, fact["content"], top_k=5):
+        hits = l1_store.search_keyword(tenant_id, user_id, fact["content"], top_k=5)
+        fact_candidate_ids.append({hit["id"] for hit in hits})
+        for hit in hits:
             candidates[hit["id"]] = hit
 
     # Offline-safe layer first: exact normalized duplicates never survive.
     surviving: list[dict] = []
+    surviving_candidate_ids: list[set[str]] = []
     candidate_norms = {_normalize(c["content"]): cid for cid, c in candidates.items()}
     seen_new_norms: set[str] = set()
-    for fact in new_facts:
+    for fact, own_ids in zip(new_facts, fact_candidate_ids):
         norm = _normalize(fact["content"])
         if norm in candidate_norms or norm in seen_new_norms:
             continue
         seen_new_norms.add(norm)
         fact["_decision"], fact["_supersedes"], fact["_contradicts"] = "store", None, None
         surviving.append(fact)
+        surviving_candidate_ids.append(own_ids)
 
     if not surviving or not candidates:
         return surviving
@@ -76,13 +84,12 @@ def consolidate(tenant_id: str, user_id: str, new_facts: list[dict]) -> list[dic
     try:
         new_lines = "\n".join(f"{i}: {f['content']}" for i, f in enumerate(surviving))
         cand_lines = "\n".join(f"{cid}: {c['content']}" for cid, c in candidates.items())
-        raw = chat(_CONSOLIDATION_PROMPT.format(new_facts=new_lines, candidates=cand_lines), max_tokens=800)
+        raw = chat(_CONSOLIDATION_PROMPT.format(new_facts=new_lines, candidates=cand_lines), max_tokens=1500)
         match = re.search(r"\[.*\]", raw, re.DOTALL)
         decisions = json.loads(match.group(0) if match else raw)
     except (LlmUnavailable, json.JSONDecodeError, AttributeError, TypeError):
         return surviving  # offline: store everything that isn't an exact dup
 
-    valid_ids = set(candidates)
     by_index = {d.get("index"): d for d in decisions if isinstance(d, dict)}
     consolidated: list[dict] = []
     for i, fact in enumerate(surviving):
@@ -90,11 +97,20 @@ def consolidate(tenant_id: str, user_id: str, new_facts: list[dict]) -> list[dic
         verdict = decision.get("decision", "store")
         target = decision.get("target_id")
         contradicts = decision.get("contradicts_id")
+        own_ids = surviving_candidate_ids[i]
 
         if verdict == "skip":
             continue
         fact["_decision"] = verdict if verdict in ("store", "update") else "store"
-        fact["_supersedes"] = target if verdict == "update" and target in valid_ids else None
-        fact["_contradicts"] = contradicts if contradicts in valid_ids else None
+        # target/contradicts must be one of THIS fact's own keyword-search
+        # candidates, not just any real id from the whole batch's unified
+        # pool. The old check (`target in valid_ids`, valid_ids = every
+        # candidate for every fact) let a cheap model's index/id mix-up
+        # silently supersede a fact with someone else's unrelated candidate
+        # — observed live: a house sale-price fact got marked superseded by
+        # a book-recommendation fact from a different session, vanishing it
+        # from recall (is_active=False) even though extraction had it right.
+        fact["_supersedes"] = target if verdict == "update" and target in own_ids else None
+        fact["_contradicts"] = contradicts if contradicts in own_ids else None
         consolidated.append(fact)
     return consolidated

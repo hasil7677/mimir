@@ -78,10 +78,27 @@ hybrid recall with a 4-signal scoring formula · semantic caching with measured 
 **Known gaps, not hidden:**
 - No real graph database yet — [KuZu](https://kuzudb.com) has no Python 3.11+ wheels as of this writing, so entity relationships live as vault `[[wikilinks]]` with hop-distance scoring instead of a Cypher-traversable graph. The scoring interface is already hop-based, so KuZu slots in without a rewrite once it's installable.
 - Entity extraction is a regex heuristic (capitalized-run detection), not a real NER model. It works, and it also occasionally wikilinks a stray proper noun it shouldn't. spaCy is the planned fix.
-- No benchmark numbers yet — no PersonaMem run, no measured recall accuracy. Every design claim here is architectural reasoning, not a published score.
+- Benchmark accuracy is still modest (43.3% on the full public AMB run below) — retrieval tuning and a real NER pass (see the entity-extraction gap above) are the next things to land, not a finished result.
 - LangChain / OpenAI Agents adapters aren't built. The HTTP contract they'd need already exists.
 
 If you're looking for something production-hardened with a support contract, this isn't it yet. If you want to see what a memory system looks like when the databases are treated as caches and the filesystem is treated as the truth, open the vault.
+
+## Benchmarks
+
+**[Agent Memory Benchmark](https://agentmemorybenchmark.ai)** — public, reproducible. Full `personamem/32k` split: 195 real sessions, 589 questions, Gemini 2.5 Flash for extraction/answering/judging.
+
+| System | Accuracy |
+|---|---|
+| Mimir | **43.3%** (255/589) |
+
+First number at real benchmark scale, not a cherry-picked sample. Actively working on closing the gap — see Known gaps above.
+
+Two smaller, informal local comparisons against mem0 and TencentDB Agent Memory (own harness, small samples — directional, not final):
+
+| Benchmark | Sample | Mimir | mem0 | TencentDB |
+|---|---|---|---|---|
+| LongMemEval-S | 6 questions | 3/6 | ~2/6 | 0/6 |
+| PersonaMem/32k | 7 questions | 4/7 (57%) | 2/7 (29%) | 3/7 (43%) |
 
 ## Development
 

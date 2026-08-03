@@ -6,3 +6,4 @@ mimir.yaml
 *.duckdb
 .mimir/
 HANDOFF.md
+PROJECT_BRIEF.md

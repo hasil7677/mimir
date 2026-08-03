@@ -59,6 +59,9 @@ def recall(tenant_id: str, user_id: str, query: str, session_id: str | None = No
 
     cached = semantic_cache.get(tenant_id, user_id, query, query_vector)
     if cached is not None:
+        cached_ids = [m["id"] for m in cached.get("memories", [])]
+        if cached_ids:
+            l1_store.bump_access(cached_ids)
         return {**cached, "cache_hit": True}
 
     # 1. Hot memory: recent turns, verbatim, unscored (degrades to empty).
@@ -163,6 +166,21 @@ def recall(tenant_id: str, user_id: str, query: str, session_id: str | None = No
     pseudo_body = " ".join(f"[[{name}]]" for name in mentioned)
     linked = vault.expand_links(tenant_id, user_id, [pseudo_body], hops=1) if mentioned else {}
 
+    # 7. Temporal history: attached whenever a kept fact was actually
+    # superseded — no query-intent gating. A keyword check on the query text
+    # ("used to", "changed", ...) sounds like the right gate but doesn't fire
+    # on the queries that actually need this: "how did your view on X
+    # evolve" is a normal-sounding statement, not a question phrased with
+    # any of those words — the AI is expected to *notice* the change
+    # unprompted, not answer only when asked. get_predecessor_chains only
+    # ever returns entries for facts that were genuinely superseded, so this
+    # is naturally zero-cost/zero-noise for the common case where nothing
+    # ever changed — no heuristic needed to keep it cheap.
+    history = l1_store.get_predecessor_chains(tenant_id, user_id, [f["id"] for f in kept])
+    for fact in kept:
+        if fact["id"] in history:
+            fact["history"] = history[fact["id"]]
+
     context_string = _assemble(hot_turns, kept, linked, profile)
     for fact in kept:  # cache serializes with json.dumps — datetimes must go
         fact["created_at"] = fact["created_at"].isoformat()
@@ -206,6 +224,9 @@ def _assemble(
                 sections.append(
                     f"{i}. [{m['type']}, priority: {m['priority']}, {_age_label(created, now)}] {m['content']}"
                 )
+                if m.get("history"):
+                    chain = " -> ".join([h["content"] for h in m["history"]] + [m["content"]])
+                    sections.append(f"   (history: {chain})")
         if linked:
             lines = []
             for name, body in linked.items():

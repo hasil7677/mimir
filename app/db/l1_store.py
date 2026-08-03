@@ -163,6 +163,56 @@ def get_top_facts(tenant_id: str, user_id: str, limit: int = 30, types: list[str
     return [dict(zip(_ROW_COLUMNS, r)) for r in rows]
 
 
+def get_predecessor_chains(tenant_id: str, user_id: str, fact_ids: list[str]) -> dict[str, list[dict]]:
+    """For each given (currently active) fact id, walks `superseded_by`
+    backward to find every fact it replaced, oldest-first.
+
+    Every other query in this module filters `is_active` — a fact's history
+    is invisible by default, which is right for "what's true now" queries
+    but wrong for "how did this change" queries, where the old, hidden
+    version is exactly what's being asked about. This is the explicit,
+    opt-in read path for that: nothing here mutates is_active or changes
+    default recall behavior, it only surfaces history when a caller asks
+    for it by id.
+    """
+    if not fact_ids:
+        return {}
+    conn = get_connection()
+    chains: dict[str, list[dict]] = {fid: [] for fid in fact_ids}
+    frontier = [(fid, fid) for fid in fact_ids]
+    seen_ids = set(fact_ids)
+
+    for _ in range(5):  # cap chain depth — sane bound, not expected to matter in practice
+        if not frontier:
+            break
+        current_ids = list({cid for _, cid in frontier})
+        placeholders = ", ".join("?" for _ in current_ids)
+        rows = conn.execute(
+            f"""
+            SELECT id, content, type, superseded_by
+            FROM l1_memories
+            WHERE tenant_id = ? AND user_id = ? AND superseded_by IN ({placeholders})
+            """,
+            [tenant_id, user_id, *current_ids],
+        ).fetchall()
+
+        by_superseded_by: dict[str, list[tuple]] = {}
+        for row in rows:
+            by_superseded_by.setdefault(row[3], []).append(row)
+
+        next_frontier = []
+        for root_id, current_id in frontier:
+            for fid, content, fact_type, _ in by_superseded_by.get(current_id, []):
+                if fid in seen_ids:
+                    continue
+                seen_ids.add(fid)
+                chains[root_id].insert(0, {"id": fid, "content": content, "type": fact_type})
+                next_frontier.append((root_id, fid))
+        frontier = next_frontier
+
+    return {k: v for k, v in chains.items() if v}
+
+
 def bump_access(fact_ids: list[str]) -> None:
     if not fact_ids:
         return

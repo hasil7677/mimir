@@ -102,10 +102,18 @@ class RecallWeights(BaseModel):
 
 class RecallConfig(BaseModel):
     strategy: str = "hybrid"  # "hybrid" | "vector" | "keyword" | "graph"
-    max_results: int = 5
+    # Was 5. Verified live against a 33-fact synthetic user (PersonaMem eval):
+    # the fact a query needed was ranked #6-9, present at max_results=10,
+    # absent at 5. 5 is fine for a light user; once real usage accumulates
+    # enough facts to have this problem at all, cutting to 5 costs more
+    # accuracy than the extra context costs in token budget.
+    max_results: int = 10
     recall_threshold: float = 0.30
     cache_threshold: float = 0.92
-    max_context_chars: int = 4000
+    # Bumped in step with max_results — otherwise the extra candidates just
+    # get discarded by the char-budget trim (_assemble pops weakest-first)
+    # instead of actually reaching the reader.
+    max_context_chars: int = 6000
     weights: RecallWeights = Field(default_factory=RecallWeights)
     decay_rate: float = 0.05
 

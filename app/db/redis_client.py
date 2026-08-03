@@ -11,7 +11,16 @@ _client: redis.Redis | None = None
 def get_redis() -> redis.Redis:
     global _client
     if _client is None:
-        _client = redis.from_url(settings.storage.redis.url, decode_responses=True)
+        # Short timeouts are load-bearing: hot-cache push is best-effort
+        # (push_turn's caller swallows failures) and must degrade fast, not
+        # block for the OS default TCP connect timeout on every push when
+        # Redis is unreachable.
+        _client = redis.from_url(
+            settings.storage.redis.url,
+            decode_responses=True,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
+        )
     return _client
 
 

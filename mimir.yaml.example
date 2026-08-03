@@ -25,11 +25,25 @@ storage:
     path: "~/.mimir/memories.db"
 
 embedding:
-  provider: "openai"  # "openai" | "local" | "none"
+  # "openai"   — any OpenAI-compatible /embeddings endpoint (Ollama included).
+  #              Dense vectors only; a real network call every time.
+  # "fastembed" — fully local, in-process (ONNX), no server/API key, no
+  #              per-call network traffic. Produces dense + sparse (BM25)
+  #              vectors, which is what unlocks Qdrant's native hybrid search
+  #              below instead of DuckDB-BM25 + a hand-rolled RRF merge.
+  #              First use downloads model weights once (anonymous, no user
+  #              content sent) into fastembed_cache_dir.
+  # "none"     — the default. Zero outbound calls, keyword-only recall.
+  provider: "none"  # "openai" | "fastembed" | "none"
   base_url: "https://api.openai.com/v1"
   api_key: "${OPENAI_API_KEY}"
   model: "text-embedding-3-small"
   dimensions: 1536
+
+  # fastembed only:
+  fastembed_dense_model: "BAAI/bge-small-en-v1.5"
+  fastembed_sparse_model: "Qdrant/bm25"
+  fastembed_cache_dir: "~/.mimir/models"
 
 llm:
   provider: "openai"

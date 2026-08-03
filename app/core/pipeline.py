@@ -4,6 +4,7 @@ MCP adapter (adapters/mcp_embedded.py), which imports the engine in-process
 so nothing has to be running when no session is open.
 """
 
+import concurrent.futures
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -45,14 +46,24 @@ def flush_session(tenant_id: str, user_id: str, session_id: str) -> dict | None:
     if not turns:
         return None
 
-    title, note_body, entities, mode = synthesis.synthesize_scene(turns)
+    # synthesize_scene and extract_facts are both pure functions of `turns` —
+    # neither reads the other's output — but used to run as two sequential
+    # LLM round-trips. That was a real, measured contributor to Mimir's
+    # per-session cost running well behind comparable systems: running them
+    # concurrently instead removes one full LLM round-trip from the
+    # critical path with no change in behavior or output.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        synthesis_future = pool.submit(synthesis.synthesize_scene, turns)
+        extraction_future = pool.submit(extraction.extract_facts, turns)
+        title, note_body, entities, mode = synthesis_future.result()
+        extracted, extraction_mode = extraction_future.result()
+
     scene_id = f"scene_{uuid.uuid4().hex[:8]}"
     note_path = vault.write_scene(
         tenant_id, user_id, scene_id, session_id,
         title, note_body, entities, source_ids=[t["id"] for t in turns],
     )
 
-    extracted, extraction_mode = extraction.extract_facts(turns)
     facts = consolidation.consolidate(tenant_id, user_id, extracted)
     now = datetime.now(timezone.utc)
     fact_ids: list[str] = []

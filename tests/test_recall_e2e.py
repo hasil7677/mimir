@@ -139,3 +139,30 @@ def test_recall_with_no_matches_returns_empty_but_valid_context():
     payload = resp.json()
     assert payload["memories"] == []
     assert "[MEMORY CONTEXT]" in payload["context_string"]
+
+
+def test_recall_surfaces_superseded_history_regardless_of_query_phrasing():
+    """No query-intent gating on purpose — a plain-sounding statement like
+    'organizing panel discussions with industry experts' is exactly the kind
+    of query PersonaMem-style evolution questions actually use, not anything
+    phrased with "used to" / "changed". History has to surface unprompted."""
+    old_id = _seed_fact("local", "u1", "User disliked researching retirement plans")
+    new_id = _seed_fact("local", "u1", "User feels a renewed interest in retirement planning")
+    l1_store.supersede(old_id, new_id)
+
+    with TestClient(app) as client:
+        resp = client.post("/v1/recall", json={"user_id": "u1", "query": "retirement planning"})
+
+    context = resp.json()["context_string"]
+    assert "history:" in context
+    assert "disliked researching retirement plans" in context
+    assert "renewed interest in retirement planning" in context
+
+
+def test_recall_omits_history_for_facts_that_were_never_superseded():
+    _seed_fact("local", "u1", "User benched 100kg at Iron Temple gym, a new PR")
+
+    with TestClient(app) as client:
+        resp = client.post("/v1/recall", json={"user_id": "u1", "query": "gym PR"})
+
+    assert "history:" not in resp.json()["context_string"]
