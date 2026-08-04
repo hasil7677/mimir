@@ -21,7 +21,7 @@ Open it in Obsidian. Edit a fact by hand. The agent sees your edit on its next t
 
 ---
 
-**[Skip to: What's under the hood](#whats-actually-happening-under-the-hood) · [Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Status / known gaps](#status)**
+**[Skip to: What's under the hood](#whats-actually-happening-under-the-hood) · [Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Roadmap](#roadmap-closing-the-gap) · [Status / known gaps](#status)**
 
 ---
 
@@ -104,6 +104,16 @@ If you're looking for something production-hardened with a support contract, thi
 | Mimir | **43.3%** (255/589) |
 
 First number at real benchmark scale, not a cherry-picked sample. See the [live leaderboard](https://agentmemorybenchmark.ai) for how this compares to other systems on the same split. Actively working on closing the gap — see Known gaps above.
+
+## Roadmap: closing the gap
+
+43.3% is a first number, not a finished one. Here's the actual order things are getting worked, not a wishlist:
+
+- **Shipped**: entity notes were getting created for names an LLM synthesis step returned even when that name never literally showed up in the note it was supposedly linked from — orphaned single-node clutter in the graph with no edge to anything. Fixed: only entities that actually got wikilinked get a note now. Also widened the regex entity extractor's filler-word list to cut false-positive nodes (conversational filler like "Sure", "Actually" getting mistaken for named entities).
+- **In progress**: an ablation test isolating whether the 4-signal recall score (semantic / frequency / recency / graph) is actually helping ranking versus plain hybrid-search order, or getting in its own way. The result decides the next move — retune the scoring weights if semantic-only wins outright, or run an oracle-mode pass (gold documents only) to isolate retrieval quality from extraction/generation if it doesn't.
+- **Next**: swap the regex capitalized-run entity extractor for real NER (spaCy) — should lift both extraction quality and graph cleanliness at once, not just patch the symptom.
+- **Next**: a real Cypher-traversable graph via [KuZu](https://kuzudb.com) once it ships Python 3.11+ wheels, replacing the current wikilink-hop-distance approximation.
+- **Then**: run the same harness against LoCoMo and LongMemEval (already wired into the eval setup) to see whether the gap is specific to personamem's question types or holds everywhere.
 
 ## Development
 
