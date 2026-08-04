@@ -20,6 +20,18 @@ _STOPWORDS = {
     "I", "It", "He", "She", "We", "You", "My", "Our", "His", "Her",
     "What", "Which", "Who", "How", "Why", "Where", "Yes", "No", "Not",
     "User", "Assistant", "Also", "Just", "Now", "Today", "Yesterday",
+    # Conversational filler and discourse markers — capitalized only
+    # because they open a sentence, never because they name anything.
+    "Sure", "Okay", "Ok", "Great", "Awesome", "Perfect", "Thanks", "Thank",
+    "Please", "Right", "Well", "Actually", "Basically", "Honestly",
+    "Certainly", "Absolutely", "Definitely", "Exactly", "Alright", "Cool",
+    "Nice", "Wow", "Oh", "Hmm", "Hey", "Hi", "Hello", "Sorry", "Maybe",
+    "Perhaps", "Probably", "Anyway", "Anyways", "Meanwhile", "However",
+    "Therefore", "Overall", "Generally", "Currently", "Recently",
+    "Previously", "Additionally", "Finally", "First", "Second", "Third",
+    "Next", "Last", "Here", "Everything", "Something", "Nothing",
+    "Someone", "Everyone", "Anybody", "Nobody", "Let", "Look", "Listen",
+    "See", "Note", "Remember", "Alrighty",
 }
 
 _CAPITALIZED_RUN = re.compile(r"\b([A-Z][a-zA-Z0-9]*(?:\s+[A-Z][a-zA-Z0-9]*)*)\b")

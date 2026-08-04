@@ -10,6 +10,7 @@ Open it in Obsidian. Edit a fact by hand. The agent sees your edit on its next t
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 [![MCP](https://img.shields.io/badge/protocol-MCP-6b5ca5)](docs/CLIENTS.md)
+[![GitHub stars](https://img.shields.io/github/stars/hasil7677/mimir?style=social)](https://github.com/hasil7677/mimir/stargazers)
 
 </div>
 
@@ -20,9 +21,19 @@ Open it in Obsidian. Edit a fact by hand. The agent sees your edit on its next t
 
 ---
 
+**[Skip to: What's under the hood](#whats-actually-happening-under-the-hood) · [Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Status / known gaps](#status)**
+
+---
+
 Every agent framework has the same problem: **conversations start from zero.** Full-context-stuffing burns your token budget, naive summarization throws facts away forever, and flat vector RAG can't tell a memory from yesterday apart from one from six months ago.
 
 Mimir is a memory engine that fixes this **without asking you to run anything.** No cloud account, no Docker, no API key. Point it at nothing and it works — a local file becomes the transcript, another becomes the searchable facts, and a folder of markdown becomes the part you can actually read, understand, and correct. Add a local model (or a cloud one) later and every layer gets sharper automatically. Nothing you built against ever has to change.
+
+| | |
+|---|---|
+| **Public benchmark** | [Agent Memory Benchmark](https://agentmemorybenchmark.ai), `personamem/32k`: **43.3%** (255/589) — real number, no cherry-picking. [Details ↓](#benchmarks) |
+| **Setup** | `pip install -e ".[dev]"` — that's it, no server, no API key |
+| **Talks to** | Claude Code / any MCP client, or a plain HTTP contract for everything else |
 
 ## Why a vault, not a database
 

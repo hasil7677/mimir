@@ -46,12 +46,19 @@ def write_scene(
 ) -> Path:
     """Writes an L2 scene note. Entity names in the body become [[wikilinks]],
     and each linked entity gets a stub note if none exists yet — so the
-    Obsidian graph never shows dangling links."""
+    Obsidian graph never shows dangling links.
+
+    Only entities that actually got wikified in the body are stubbed. The
+    caller's `entities` list can include names an LLM synthesis step named
+    but never literally wrote into `body` (paraphrase, case drift); stubbing
+    those anyway would create a vault note with no backlink to it at all —
+    an orphaned single node, not just a sparsely-connected one.
+    """
     root = _user_root(tenant_id, user_id)
     scenes_dir = root / "scenes"
     scenes_dir.mkdir(parents=True, exist_ok=True)
 
-    linked_body = okf.wikify(body, entities)
+    linked_body, linked_entities = okf.wikify(body, entities)
     frontmatter = {
         "id": scene_id,
         "type": "scene",
@@ -62,7 +69,7 @@ def write_scene(
     note_path = scenes_dir / f"{okf.slugify(title)}.md"
     note_path.write_text(okf.render_note(frontmatter, f"# {title}\n\n{linked_body}"), encoding="utf-8")
 
-    for entity in entities:
+    for entity in linked_entities:
         ensure_entity_stub(tenant_id, user_id, entity)
     return note_path
 
