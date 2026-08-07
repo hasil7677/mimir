@@ -64,6 +64,48 @@ def test_write_scene_creates_entity_stubs_so_no_dangling_links():
     assert vault.read_note("t1", "u1", "Acme") is not None
 
 
+def test_write_scene_backlinks_entity_notes_to_the_scene():
+    """Without this, entity notes are permanent dead ends — no outgoing
+    link means graph_hops traversal and the LINKED NOTES prompt section
+    both have nothing to walk past the entity itself."""
+    vault.write_scene(
+        "t1", "u1", "scene_1", "s1", "Deadlift day",
+        body="Coached by Vikram at Iron Temple.",
+        entities=["Vikram", "Iron Temple"], source_ids=[],
+    )
+
+    _, vikram_body = vault.read_note("t1", "u1", "Vikram")
+    assert "Mentioned in scenes:" in vikram_body
+    assert "[[deadlift-day|Deadlift day]]" in vikram_body
+
+
+def test_write_scene_backlink_is_idempotent_across_repeat_mentions():
+    for _ in range(2):
+        vault.write_scene(
+            "t1", "u1", "scene_1", "s1", "Deadlift day",
+            body="Coached by Vikram at Iron Temple.",
+            entities=["Vikram", "Iron Temple"], source_ids=[],
+        )
+
+    _, body = vault.read_note("t1", "u1", "Vikram")
+    assert body.count("Deadlift day") == 1, "re-flushing the same scene must not duplicate the backlink"
+
+
+def test_write_scene_backlink_accumulates_across_different_scenes():
+    vault.write_scene(
+        "t1", "u1", "scene_1", "s1", "Deadlift day",
+        body="Coached by Vikram today.", entities=["Vikram"], source_ids=[],
+    )
+    vault.write_scene(
+        "t1", "u1", "scene_2", "s2", "Squat day",
+        body="Vikram adjusted my squat form.", entities=["Vikram"], source_ids=[],
+    )
+
+    _, body = vault.read_note("t1", "u1", "Vikram")
+    assert "Deadlift day" in body
+    assert "Squat day" in body
+
+
 def test_entity_stub_never_overwrites_user_edits():
     stub = vault.ensure_entity_stub("t1", "u1", "Sarah")
     stub.write_text("# Sarah\n\nMy sister. Lives in Berlin.", encoding="utf-8")

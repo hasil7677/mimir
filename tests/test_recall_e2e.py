@@ -88,6 +88,54 @@ def test_recall_includes_linked_vault_notes():
     assert "data-driven" in context
 
 
+def test_graph_hops_reaches_co_mentioned_entities_via_scene_backlink():
+    """The graph signal only means anything if hop traversal actually
+    reaches something: entity -> scene it was mentioned in (hop 1) ->
+    other entities mentioned in that same scene (hop 2)."""
+    from app.core import vault
+    from app.core.recall import _graph_hops
+
+    vault.write_scene(
+        "local", "u1", "sc1", "s1", "Gym session with Sarah",
+        body="Sarah and the user trained at Iron Temple today.",
+        entities=["Sarah", "Iron Temple"], source_ids=[],
+    )
+
+    hops = _graph_hops("local", "u1", "training with Sarah")
+
+    assert hops.get("sarah") == 0  # named directly in the query
+    assert hops.get("iron temple") == 2, (
+        "a multi-word entity co-mentioned in the same scene must land at hop 2, "
+        "keyed by its natural display name (not its slug) so it can substring-match "
+        "real fact prose"
+    )
+
+
+def test_graph_score_boosts_fact_about_co_mentioned_entity(monkeypatch):
+    """End-to-end: a fact about an entity that never appears in the query
+    should still get a nonzero graph_score if it's vault-connected to an
+    entity the query does name."""
+    from app.core import vault
+
+    vault.write_scene(
+        "local", "u1", "sc1", "s1", "Gym session with Sarah",
+        body="Sarah and the user trained at Iron Temple today.",
+        entities=["Sarah", "Iron Temple"], source_ids=[],
+    )
+    # Shares "training" with the query so keyword search retrieves it at all
+    # — graph_score augments an already-retrieved candidate, it isn't an
+    # independent retrieval path. Deliberately never says "Sarah" — the point
+    # is to isolate the hop-2 graph signal, not a direct hop-0 keyword hit.
+    fact_id = _seed_fact("local", "u1", "Iron Temple has a strict no-phone policy during training sessions")
+
+    with TestClient(app) as client:
+        resp = client.post("/v1/recall", json={"user_id": "u1", "query": "training with Sarah"})
+
+    memories = {m["id"]: m for m in resp.json()["memories"]}
+    assert fact_id in memories
+    assert memories[fact_id]["graph_score"] == 0.25
+
+
 def test_vector_path_finds_semantic_match_keyword_search_misses(monkeypatch):
     """The reason the vector leg exists: 'protein powder' should surface the
     powerlifting fact despite zero keyword overlap."""
@@ -119,6 +167,35 @@ def test_vector_path_finds_semantic_match_keyword_search_misses(monkeypatch):
     ids = [m["id"] for m in payload["memories"]]
     assert lifting in ids, "semantic match must surface despite zero keyword overlap"
     assert ids[0] == lifting
+
+
+def test_keyword_only_hit_keeps_rrf_relevance_instead_of_zero(monkeypatch):
+    """When the vector leg runs, a fact BM25 finds but the vector leg's
+    top-20 doesn't (pushed out by 20 more-similar fillers) used to be forced
+    to semantic=0.0 even though its RRF-derived keyword relevance was sitting
+    right there — cutting its score via weights.semantic for no reason."""
+    monkeypatch.setattr(settings.embedding, "provider", "openai")
+
+    filler_ids = [_seed_fact("local", "u1", f"Filler fact number {i} about the weather") for i in range(20)]
+    target_id = _seed_fact("local", "u1", "User's favorite made-up word is zephyrion")
+
+    facts = l1_store.get_facts_by_ids("local", "u1", filler_ids + [target_id])
+    fake_vectors = {f["content"]: ([0.0, 1.0, 0.0] if f["id"] == target_id else [1.0, 0.0, 0.0]) for f in facts}
+    fake_vectors["zephyrion"] = [1.0, 0.0, 0.0]  # query vector: close to fillers, far from target
+
+    def fake_embed(texts):
+        return [fake_vectors[t] for t in texts]
+
+    with patch("app.core.recall.embed", side_effect=fake_embed):
+        vector_store.upsert_facts("local", "u1", facts, fake_embed([f["content"] for f in facts]))
+        with TestClient(app) as client:
+            resp = client.post("/v1/recall", json={"user_id": "u1", "query": "zephyrion"})
+
+    payload = resp.json()
+    assert payload["vector_used"] is True
+    hit = next((m for m in payload["memories"] if m["id"] == target_id), None)
+    assert hit is not None, "the exact keyword hit must still surface even when vector search misses it"
+    assert hit["semantic_score"] > 0.0, "must keep RRF keyword relevance instead of collapsing to 0.0"
 
 
 def test_context_string_respects_char_budget(monkeypatch):

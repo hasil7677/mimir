@@ -20,21 +20,46 @@ logger = logging.getLogger(__name__)
 
 def _graph_hops(tenant_id: str, user_id: str, query: str) -> dict[str, int]:
     """entity name (lowercased) -> hop distance from the query. Hop 0 =
-    named in the query itself; hops 1-2 = reached via vault wikilinks."""
+    named in the query itself; hops 1-2 = reached via vault wikilinks
+    (typically entity -> scene it was mentioned in -> other entities
+    mentioned in that same scene)."""
     hops: dict[str, int] = {}
     query_entities = synthesis.extract_entities_naive(query)
     for name in query_entities:
         hops[name.lower()] = 0
 
-    frontier = [f"[[{e}]]" for e in query_entities]
+    # Seed the frontier with each query entity's OWN note body, not a
+    # re-resolution of the entity itself — resolving "[[Sarah]]" just
+    # fetches Sarah's note again, which is already known at hop 0 and gets
+    # dropped by the `not in hops` check below, wasting the first iteration.
+    # Starting from the note's contents means hop 1 lands on what Sarah's
+    # note actually links to (the scenes she's mentioned in).
+    seeded = vault.expand_links(tenant_id, user_id, [f"[[{e}]]" for e in query_entities], hops=1)
+    frontier = list(seeded.values())
+
     for hop in (1, 2):
         expanded = vault.expand_links(tenant_id, user_id, frontier, hops=1)
         frontier = []
         for name, body in expanded.items():
-            if name.lower() not in hops:
-                hops[name.lower()] = hop
-                frontier.append(body)
+            frontier.append(body)  # keep expanding even if already seen at an earlier hop
+            # Use the note's own heading, not the wikilink target, as the
+            # key: multi-word entities are wikilinked as their slug
+            # ("iron-temple"), which never substring-matches natural fact
+            # prose ("...at Iron Temple..."). The note's "# Iron Temple"
+            # heading gives back the space-separated form hop 0 already
+            # uses, so both hop levels match fact content the same way.
+            display = _note_heading(body, fallback=name).lower()
+            if display not in hops:
+                hops[display] = hop
     return hops
+
+
+def _note_heading(body: str, fallback: str) -> str:
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip()
+    return fallback
 
 
 def _fact_graph_hops(content: str, entity_hops: dict[str, int]) -> int | None:
@@ -140,9 +165,13 @@ def recall(tenant_id: str, user_id: str, query: str, session_id: str | None = No
 
     scored = []
     for fact_id, fact in facts_by_id.items():
-        # semantic = real cosine when the vector leg ran; otherwise the
-        # normalized RRF stands in so keyword relevance still drives ranking
-        semantic = semantic_by_id.get(fact_id, rrf.get(fact_id, 0.0) / max_rrf if not vector_used else 0.0)
+        # semantic = real cosine when the vector leg found this fact;
+        # otherwise the normalized RRF rank stands in, so an exact BM25
+        # keyword hit that the vector leg missed still keeps its keyword
+        # relevance instead of being collapsed to 0.0 (rrf is legitimately
+        # {} only in the hybrid_used path, where every fact in facts_by_id
+        # is already in semantic_by_id and this fallback never fires).
+        semantic = semantic_by_id.get(fact_id, rrf.get(fact_id, 0.0) / max_rrf)
         recency = scoring.recency_score(fact["created_at"], now)
         frequency = scoring.frequency_score(fact["access_count"], max_access)
         graph = scoring.graph_score(_fact_graph_hops(fact["content"], entity_hops))

@@ -69,8 +69,10 @@ def write_scene(
     note_path = scenes_dir / f"{okf.slugify(title)}.md"
     note_path.write_text(okf.render_note(frontmatter, f"# {title}\n\n{linked_body}"), encoding="utf-8")
 
+    scene_slug = note_path.stem
     for entity in linked_entities:
-        ensure_entity_stub(tenant_id, user_id, entity)
+        entity_path = ensure_entity_stub(tenant_id, user_id, entity)
+        _add_scene_backlink(entity_path, scene_slug, title)
     return note_path
 
 
@@ -88,6 +90,31 @@ def ensure_entity_stub(tenant_id: str, user_id: str, entity_name: str) -> Path:
         }
         path.write_text(okf.render_note(frontmatter, f"# {entity_name}\n"), encoding="utf-8")
     return path
+
+
+def _add_scene_backlink(path: Path, scene_slug: str, scene_title: str) -> None:
+    """Appends a backlink to the given scene under a `Mentioned in scenes:`
+    line — additive-only, idempotent (safe to call every time the same
+    entity gets linked again), never touches anything else in the note.
+
+    Without this, entity notes are permanent dead ends: no outgoing link
+    means graph_hops has nothing to walk past hop 0, and recall's LINKED
+    NOTES section (which looks for the first non-heading line in a linked
+    note) never has anything to show. This is what actually makes the vault
+    a graph instead of a pile of disconnected single-line stubs.
+    """
+    link = f"[[{scene_slug}|{scene_title}]]"
+    frontmatter, body = okf.parse_note(path.read_text(encoding="utf-8"))
+    if link in body:
+        return
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("Mentioned in scenes:"):
+            lines[i] = f"{line.rstrip()}, {link}"
+            path.write_text(okf.render_note(frontmatter, "\n".join(lines)), encoding="utf-8")
+            return
+    body = body.rstrip() + f"\n\nMentioned in scenes: {link}\n"
+    path.write_text(okf.render_note(frontmatter, body), encoding="utf-8")
 
 
 def upsert_persona(tenant_id: str, user_id: str, body: str, extra_frontmatter: dict | None = None) -> Path:
