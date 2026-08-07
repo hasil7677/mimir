@@ -14,10 +14,9 @@ Open it in Obsidian. Edit a fact by hand. The agent sees your edit on its next t
 
 </div>
 
-<!-- 📸 REPLACE ME: a GIF or screenshot of the Obsidian graph view showing
-     scenes → entities linked by [[wikilinks]], grown from a real conversation.
-     This is the single highest-leverage thing in this README — the whole
-     pitch is "your agent's brain is a vault you can see," so show it. -->
+<video src="https://raw.githubusercontent.com/hasil7677/mimir/main/docs/images/vault-demo.mp4" controls muted playsinline width="800">
+  Your agent's memory is a folder of markdown files — watch it in Obsidian: docs/images/vault-demo.mp4
+</video>
 
 ---
 
