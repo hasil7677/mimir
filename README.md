@@ -89,7 +89,7 @@ hybrid recall with a 4-signal scoring formula · semantic caching with measured 
 **Known gaps, not hidden:**
 - No real graph database yet — [KuZu](https://kuzudb.com) has no Python 3.11+ wheels as of this writing, so entity relationships live as vault `[[wikilinks]]` with hop-distance scoring instead of a Cypher-traversable graph. The scoring interface is already hop-based, so KuZu slots in without a rewrite once it's installable.
 - Entity extraction is a regex heuristic (capitalized-run detection), not a real NER model. It works, and it also occasionally wikilinks a stray proper noun it shouldn't. spaCy is the planned fix.
-- Benchmark accuracy is still modest (49.4% on the full public AMB run below) — a real NER pass (see the entity-extraction gap above) and an oracle-mode diagnostic are next, not a finished result.
+- Benchmark accuracy is still modest (49.4% on the full public AMB run below). An oracle-mode diagnostic (gold docs only, no retrieval noise) scored 50.8% — barely above the real-retrieval number — which means extraction quality, not retrieval, is the current ceiling. A real NER pass (see the entity-extraction gap above) is next.
 - LangChain / OpenAI Agents adapters aren't built. The HTTP contract they'd need already exists.
 
 If you're looking for something production-hardened with a support contract, this isn't it yet. If you want to see what a memory system looks like when the databases are treated as caches and the filesystem is treated as the truth, open the vault.
@@ -101,8 +101,9 @@ If you're looking for something production-hardened with a support contract, thi
 | System | Accuracy |
 |---|---|
 | Mimir | **49.4%** (291/589) |
+| Mimir — oracle mode (gold docs only, no retrieval noise) | 50.8% (299/589) |
 
-First number at real benchmark scale, not a cherry-picked sample. See the [live leaderboard](https://agentmemorybenchmark.ai) for how this compares to other systems on the same split. Actively working on closing the gap — see Known gaps above.
+First number at real benchmark scale, not a cherry-picked sample. See the [live leaderboard](https://agentmemorybenchmark.ai) for how this compares to other systems on the same split. The oracle row bypasses retrieval entirely — only the gold-relevant documents get ingested, so retrieval/scoring can't lose you points. It moved the needle by 1.4 points. That's a diagnostic result, not a vanity one: it means retrieval and graph scoring are already close to their ceiling, and the real accuracy cap right now is extraction and answer-generation quality, not what gets retrieved. Roadmap below is ordered accordingly.
 
 ## Roadmap: closing the gap
 
@@ -110,8 +111,8 @@ First number at real benchmark scale, not a cherry-picked sample. See the [live 
 
 - **Shipped**: entity notes were getting created for names an LLM synthesis step returned even when that name never literally showed up in the note it was supposedly linked from — orphaned single-node clutter in the graph with no edge to anything. Fixed: only entities that actually got wikilinked get a note now. Also widened the regex entity extractor's filler-word list to cut false-positive nodes (conversational filler like "Sure", "Actually" getting mistaken for named entities).
 - **Shipped**: graph traversal was structurally dead — entity notes had no outgoing links, so hop-1/2 scoring and the LINKED NOTES prompt section never had anything to walk. Entity notes now backlink to every scene that mentions them, and two knock-on bugs (a wasted first traversal hop, multi-word entities keyed by slug instead of display text) got fixed alongside it. Also fixed a scoring bug where an exact BM25 keyword hit the vector leg missed was forced to semantic=0.0 instead of keeping its RRF-derived relevance. Together: 43.3% → 49.4%.
-- **Next**: an oracle-mode diagnostic (ingest only gold documents, bypassing retrieval noise) to see how much of the remaining gap is retrieval versus extraction/generation quality — decides whether more scoring/graph work is worth it or if extraction is the real ceiling.
-- **Next**: swap the regex capitalized-run entity extractor for real NER (spaCy) — should lift both extraction quality and graph cleanliness at once, not just patch the symptom.
+- **Shipped**: ran an oracle-mode diagnostic (ingest only gold documents, bypassing retrieval noise entirely) to find out how much of the remaining gap is retrieval versus extraction/generation quality. Result: 50.8% vs. 49.4% — a 1.4-point move. Retrieval and graph scoring are already close to their ceiling; extraction and answer generation are the real cap. Reprioritized the list below accordingly.
+- **Next**: swap the regex capitalized-run entity extractor for real NER (spaCy) — the oracle result points squarely at extraction quality as the bottleneck, not retrieval, so this moves up.
 - **Next**: a real Cypher-traversable graph via [KuZu](https://kuzudb.com) once it ships Python 3.11+ wheels, replacing the current wikilink-hop-distance approximation.
 - **Then**: run the same harness against LoCoMo and LongMemEval (already wired into the eval setup) to see whether the gap is specific to personamem's question types or holds everywhere.
 
