@@ -88,15 +88,14 @@ hybrid recall with a 4-signal scoring formula · semantic caching with measured 
 
 **Known gaps, not hidden:**
 - No real graph database yet. [KuZu](https://kuzudb.com) has no Python 3.11+ wheels as of this writing, so entity relationships live as vault `[[wikilinks]]` with hop-distance scoring instead of a Cypher-traversable graph. The scoring interface is already hop-based, so KuZu slots in without a rewrite once it's installable.
-- Entity extraction now runs real NER (spaCy `en_core_web_sm`, optional `mimir-engine[ner]` extra) instead of the old regex capitalized-run heuristic, which remains as the fallback when spaCy isn't installed.
-- Benchmark accuracy is 59.6% on the full public AMB run below (up from 43.3% first-pass). The single biggest lever wasn't a Mimir code change at all: the AMB harness silently defaults to a weak `gemini-2.5-flash-lite` model for answering the benchmark questions. Pointing it at the same `gemini-2.5-flash` tier already used for Mimir's own extraction/synthesis moved accuracy 48.7% to 59.6%, and an oracle-mode diagnostic (gold docs only, zero retrieval noise) landed at the *exact same* 59.6% ceiling under `flash`. That convergence is the real signal: once the answer model is competent, real Mimir retrieval and theoretically-perfect retrieval score identically, so retrieval/graph quality is no longer the constraint. The answer model's own reasoning is. (Also tried `gemini-2.5-pro`, expecting it to do even better. It scored *worse*, 46.0%, second-guessing itself on this benchmark's forced-choice-between-near-identical-paraphrases format in a way `flash` doesn't. Bigger isn't automatically better here.)
+- Accuracy is well short of the top of the benchmark: 59.6% against 81.8% to 86.6% for the three published entries on the same split. See [Benchmarks](#benchmarks) for the numbers, the caveats on comparing them, and the leading hypothesis for the gap.
 - LangChain / OpenAI Agents adapters aren't built. The HTTP contract they'd need already exists.
 
 If you're looking for something production-hardened with a support contract, this isn't it yet. If you want to see what a memory system looks like when the databases are treated as caches and the filesystem is treated as the truth, open the vault.
 
 ## Benchmarks
 
-**[Agent Memory Benchmark](https://agentmemorybenchmark.ai)**: public, reproducible. Full `personamem/32k` split: 195 real sessions, 589 questions, multiple-choice (exact-letter-match scored, no LLM judge involved for this task type). Mimir's own extraction/synthesis always runs on `gemini-2.5-flash`; the table below varies only the model the *benchmark harness* uses to answer the MCQ questions, since that turned out to matter more than anything in Mimir's own retrieval pipeline.
+**[Agent Memory Benchmark](https://agentmemorybenchmark.ai)**: public, reproducible. Full `personamem/32k` split: 195 real sessions, 589 questions, multiple-choice (exact-letter-match scored, no LLM judge involved for this task type). Mimir's own extraction/synthesis always runs on `gemini-2.5-flash`; the table below varies only the model the *benchmark harness* uses to answer the MCQ questions.
 
 | Retrieval | Answer model | Accuracy |
 |---|---|---|
@@ -106,9 +105,32 @@ If you're looking for something production-hardened with a support contract, thi
 | Oracle mode (gold docs only, zero retrieval noise) | `gemini-2.5-flash-lite` | 50.8% (299/589) |
 | Oracle mode (gold docs only, zero retrieval noise) | `gemini-2.5-flash` | 59.6% (351/589) |
 
-Headline number is real Mimir retrieval plus `gemini-2.5-flash` answering: **59.6%**. Not cherry-picked: the table shows all three answer models tried, including the one that scored worse (`pro`). See the [live leaderboard](https://agentmemorybenchmark.ai) for how this compares to other systems (their configured answer model per-provider isn't independently verified here yet, a fairness pass on that is still open, see roadmap).
+Headline number is real Mimir retrieval plus `gemini-2.5-flash` answering: **59.6%**.
 
-The oracle-mode rows are the key diagnostic. Oracle mode bypasses retrieval entirely (only gold-relevant documents get ingested, so retrieval/graph scoring literally cannot cost you points), and under `flash` it lands at **the exact same 59.6%** as real retrieval. Under a weak answer model there was a real ~2-point retrieval gap (48.7% vs. 50.8%); under a competent one, that gap vanishes completely. In other words: Mimir's own retrieval and 4-signal graph scoring are no longer where the accuracy is being lost. The constraint moved entirely to the answer model's own reasoning quality on this benchmark's question format.
+### The answer model matters more than the memory system
+
+The harness picks its own model to answer the benchmark's multiple-choice questions, independent of whatever the memory provider uses internally. It defaults to `gemini-2.5-flash-lite`, and nothing in the provider API surfaces that. Pointing that step at `gemini-2.5-flash`, the same tier Mimir already uses for its own extraction, moved accuracy from 48.7% to 59.6% without touching a line of engine code. `gemini-2.5-pro` went the other way, down to 46.0%, apparently second-guessing itself on a format where every distractor is a near-paraphrase of the right answer. This is a benchmark configuration fact, not a Mimir result, which is why it is spelled out rather than folded quietly into the headline.
+
+### Where Mimir actually stands
+
+The three published entries on this split, from the benchmark's own `results-manifest.json`:
+
+| System | Accuracy | Avg context tokens per query |
+|---|---|---|
+| hindsight | 86.6% | 15,812 |
+| hybrid-search | 84.4% | 24,169 |
+| cognee | 81.8% | 11,848 |
+| **Mimir** | **59.6%** | **178** |
+
+No rank is being claimed from this. Those three ran in a `single-query` response mode that isn't registered in the installed harness (which offers `rag`, `agentic-rag`, and `agent`), and their answer-model configuration hasn't been verified, which the section above shows is worth double-digit points on its own. Treat it as orientation, not a leaderboard position: Mimir is roughly 25 points behind the top, and that gap is real regardless of how the caveats resolve.
+
+The context column is the most interesting thing in that table. Mimir ships about **178 tokens per query** where the leaders ship 11,800 to 24,200. That is a 60x to 135x difference in how much material the answer model gets to reason over.
+
+### What the oracle test does and does not prove
+
+Oracle mode ingests only the gold-relevant documents, so document selection cannot cost any points. Under `flash` it scores **59.6%, identical to real retrieval**. Under the weak default model there had been a 2-point gap (48.7% vs. 50.8%) which disappears entirely once the answer model is competent.
+
+That rules out *which documents get found* as the current constraint. It does not rule out *how much context reaches the model*, because both the real and oracle paths funnel through the same recall step, capped at `max_results: 10` and `max_context_chars: 6000`. Oracle mode changed the corpus, not the width of the window. Given the token column above, deliberately widening that window is the most plausible remaining lever and it has not been tested yet.
 
 ## Roadmap: closing the gap
 
@@ -116,13 +138,14 @@ The oracle-mode rows are the key diagnostic. Oracle mode bypasses retrieval enti
 
 - **Shipped**: entity notes were getting created for names an LLM synthesis step returned even when that name never literally showed up in the note it was supposedly linked from, orphaned single-node clutter in the graph with no edge to anything. Fixed: only entities that actually got wikilinked get a note now. Also widened the regex entity extractor's filler-word list to cut false-positive nodes (conversational filler like "Sure", "Actually" getting mistaken for named entities).
 - **Shipped**: graph traversal was structurally dead. Entity notes had no outgoing links, so hop-1/2 scoring and the LINKED NOTES prompt section never had anything to walk. Entity notes now backlink to every scene that mentions them, and two knock-on bugs (a wasted first traversal hop, multi-word entities keyed by slug instead of display text) got fixed alongside it. Also fixed a scoring bug where an exact BM25 keyword hit the vector leg missed was forced to semantic=0.0 instead of keeping its RRF-derived relevance. Together: 43.3% to 49.4%.
-- **Shipped**: ran an oracle-mode diagnostic (ingest only gold documents, bypassing retrieval noise entirely) to find out how much of the remaining gap is retrieval versus extraction/generation quality. Result at the time: 50.8% vs. 49.4%, only a 1.4-point move, so retrieval and graph scoring looked close to their ceiling. (This conclusion held up but for a different reason than expected, see below.)
+- **Shipped**: ran an oracle-mode diagnostic (ingest only gold documents, bypassing retrieval noise entirely) to find out how much of the remaining gap is retrieval versus extraction/generation quality. Result at the time: 50.8% vs. 49.4%, only a 1.4-point move, so document selection looked close to its ceiling.
 - **Shipped, no measurable win**: swapped the regex capitalized-run entity extractor for real NER (spaCy `en_core_web_sm`, optional `mimir-engine[ner]` extra, degrades to the old regex heuristic if it isn't installed). Also drops numeric/temporal entity labels (dates, quantities, money) and lowercase false positives the small model occasionally tags, neither of which are wikilink-worthy. Re-ran the full benchmark: 48.7% vs. the pre-swap 49.4%, flat, within noise, arguably slightly down. Kept the change anyway (strictly better entity quality, cleaner vault graph) but it confirmed entity/graph quality wasn't the lever.
-- **Shipped, the actual lever**: the oracle-mode diagnostic above was quietly using a weak answer model the whole time. The AMB harness silently defaults to `gemini-2.5-flash-lite` for answering benchmark questions, completely independent of what LLM Mimir itself uses for extraction. Pointed the harness's answer step at `gemini-2.5-flash` (the same tier Mimir's extraction already uses) instead: **48.7% to 59.6%**, and oracle mode moved in lockstep to the identical 59.6%. That convergence is the real finding: under a competent answer model, real Mimir retrieval and theoretically-perfect retrieval score identically, so the roughly 2-point "retrieval gap" measured earlier wasn't really about retrieval quality at all. It was retrieval quality *as a bottleneck for a weak answer model*. Also tried `gemini-2.5-pro` expecting further gains: it scored worse (46.0%), second-guessing itself on this benchmark's near-identical-paraphrase MCQ format in a way `flash` doesn't. Not a Mimir engine change; a benchmark-harness configuration fix, disclosed as exactly that.
-- **Next**: verify whether other AMB leaderboard entries are configured with a comparably competent answer model or are also sitting on a weak default. Matters for how the leaderboard comparison should be read, not addressed yet.
-- **Next**: prompt-level work on the MCQ answer step itself (more directive instructions, maybe few-shot examples) now that the answer model, not retrieval, is the known ceiling. The next accuracy gains likely live here, not in the engine.
-- **Then**: a real Cypher-traversable graph via [KuZu](https://kuzudb.com) once it ships Python 3.11+ wheels, replacing the current wikilink-hop-distance approximation. Still a legitimate architecture improvement, just no longer expected to move this particular benchmark number much.
-- **Then**: run the same harness against LoCoMo and LongMemEval (already wired into the eval setup) to see whether the retrieval-ceiling finding above holds on other question formats too, or is specific to personamem's paraphrase-heavy MCQ style.
+- **Shipped, the actual lever, and not an engine change**: found the harness was answering questions with a weak default model and repointed it. 48.7% to 59.6%. Written up in full under [Benchmarks](#the-answer-model-matters-more-than-the-memory-system), including the `pro` run that went backwards.
+- **Next**: widen the recall window. Mimir ships ~178 context tokens per query against 11,800 to 24,200 for the published entries, and the oracle test never varied this. Sweep `recall.max_results` and `max_context_chars` upward and measure. This is the clearest untested hypothesis for the remaining 25-point gap.
+- **Next**: verify what answer model the other published entries actually used, and whether `single-query` mode can be run locally at all. Until both are known, the comparison in the table above is orientation rather than a ranking.
+- **Then**: prompt-level work on the MCQ answer step (more directive instructions, maybe few-shot examples).
+- **Then**: a real Cypher-traversable graph via [KuZu](https://kuzudb.com) once it ships Python 3.11+ wheels, replacing the current wikilink-hop-distance approximation. Still a legitimate architecture improvement, just not expected to be the thing that moves this number.
+- **Then**: run the same harness against LoCoMo and LongMemEval (already wired into the eval setup) to see whether these findings hold on other question formats, or are specific to personamem's paraphrase-heavy MCQ style.
 
 ## Development
 
