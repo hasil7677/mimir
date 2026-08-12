@@ -39,6 +39,14 @@ dev = [
 fastembed = [
     "fastembed>=0.3.0",
 ]
+# Not a core dependency on purpose, same reasoning as fastembed above.
+# extract_entities_naive() degrades to the regex heuristic if this isn't
+# installed. en_core_web_sm is pulled directly from its release wheel since
+# spaCy models aren't distributed as regular PyPI packages.
+ner = [
+    "spacy>=3.8",
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -46,6 +54,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.hatch.metadata]
+# Needed for the `ner` extra: spaCy models aren't on PyPI, only as
+# direct-download wheel URLs.
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

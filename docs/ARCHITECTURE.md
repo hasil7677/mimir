@@ -112,11 +112,13 @@ raise `LlmUnavailable` / `EmbeddingsUnavailable` — typed signals that mean
 `synthesize_scene(turns)` → `(title, body, entities, mode)`. LLM path asks for
 JSON `{title, summary, entities}`; any failure (unreachable, garbage output)
 falls back to a deterministic transcript digest marked `synthesis: digest`.
-Also home to `extract_entities_naive`: capitalized-run detection with a
-sentence-start guard (a lone capitalized word opening a sentence only counts
-if seen capitalized mid-sentence elsewhere — this is what keeps `Huge!` and
-`Smooth.` from becoming entities in your vault). spaCy replaces it later;
-interface stays.
+Also home to `extract_entities_naive`: spaCy NER (`en_core_web_sm`, optional
+`mimir-engine[ner]` extra) when installed, numeric/temporal labels (dates,
+quantities, money) dropped since they aren't wikilink-worthy. Falls back to
+a capitalized-run regex heuristic with a sentence-start guard when spaCy
+isn't installed (a lone capitalized word opening a sentence only counts if
+seen capitalized mid-sentence elsewhere, which is what keeps `Huge!` and
+`Smooth.` from becoming entities in your vault).
 
 ### `app/core/extraction.py` — turns → L1 atomic facts
 `extract_facts(turns)` → `(facts, mode)`. LLM path: typed facts

@@ -30,7 +30,7 @@ Mimir is a memory engine that fixes this **without asking you to run anything.**
 
 | | |
 |---|---|
-| **Public benchmark** | [Agent Memory Benchmark](https://agentmemorybenchmark.ai), `personamem/32k`: **49.4%** (291/589) — real number, no cherry-picking. [Details ↓](#benchmarks) |
+| **Public benchmark** | [Agent Memory Benchmark](https://agentmemorybenchmark.ai), `personamem/32k`: **59.6%** (351/589), real number, no cherry-picking. [Details ↓](#benchmarks) |
 | **Setup** | `pip install -e ".[dev]"` — that's it, no server, no API key |
 | **Talks to** | Claude Code / any MCP client, or a plain HTTP contract for everything else |
 
@@ -83,44 +83,52 @@ Also documented: OpenCode (native MCP), Pi (via the community `pi-mcp-adapter`),
 
 This is early — built fast, tested hard, not yet battle-tested by anyone but me. Here's the honest split:
 
-**Solid and tested (102 tests — 99 pass with zero services running, 3 need a live Redis — real HTTP layer, real filesystem, real dedup logic):**
+**Solid and tested (113 tests, 109 pass with zero services/extras installed, 4 skip: 3 need a live Redis, 1 needs the optional `fastembed` extra, real HTTP layer, real filesystem, real dedup logic):**
 hybrid recall with a 4-signal scoring formula · semantic caching with measured cache hits · L1.5 fact consolidation (exact-dup detection needs zero LLM calls; an LLM present gets you store/skip/supersede/contradiction-flag decisions, with hallucinated target IDs rejected) · GDPR-style erasure and export across every store · a self-healing recovery path for orphaned sessions (found live, fixed same day — see the commit log if you want to watch that happen) · MCP support verified end-to-end inside real Claude Code sessions.
 
 **Known gaps, not hidden:**
-- No real graph database yet — [KuZu](https://kuzudb.com) has no Python 3.11+ wheels as of this writing, so entity relationships live as vault `[[wikilinks]]` with hop-distance scoring instead of a Cypher-traversable graph. The scoring interface is already hop-based, so KuZu slots in without a rewrite once it's installable.
-- Entity extraction is a regex heuristic (capitalized-run detection), not a real NER model. It works, and it also occasionally wikilinks a stray proper noun it shouldn't. spaCy is the planned fix.
-- Benchmark accuracy is still modest (49.4% on the full public AMB run below). An oracle-mode diagnostic (gold docs only, no retrieval noise) scored 50.8% — barely above the real-retrieval number — which means extraction quality, not retrieval, is the current ceiling. A real NER pass (see the entity-extraction gap above) is next.
+- No real graph database yet. [KuZu](https://kuzudb.com) has no Python 3.11+ wheels as of this writing, so entity relationships live as vault `[[wikilinks]]` with hop-distance scoring instead of a Cypher-traversable graph. The scoring interface is already hop-based, so KuZu slots in without a rewrite once it's installable.
+- Entity extraction now runs real NER (spaCy `en_core_web_sm`, optional `mimir-engine[ner]` extra) instead of the old regex capitalized-run heuristic, which remains as the fallback when spaCy isn't installed.
+- Benchmark accuracy is 59.6% on the full public AMB run below (up from 43.3% first-pass). The single biggest lever wasn't a Mimir code change at all: the AMB harness silently defaults to a weak `gemini-2.5-flash-lite` model for answering the benchmark questions. Pointing it at the same `gemini-2.5-flash` tier already used for Mimir's own extraction/synthesis moved accuracy 48.7% to 59.6%, and an oracle-mode diagnostic (gold docs only, zero retrieval noise) landed at the *exact same* 59.6% ceiling under `flash`. That convergence is the real signal: once the answer model is competent, real Mimir retrieval and theoretically-perfect retrieval score identically, so retrieval/graph quality is no longer the constraint. The answer model's own reasoning is. (Also tried `gemini-2.5-pro`, expecting it to do even better. It scored *worse*, 46.0%, second-guessing itself on this benchmark's forced-choice-between-near-identical-paraphrases format in a way `flash` doesn't. Bigger isn't automatically better here.)
 - LangChain / OpenAI Agents adapters aren't built. The HTTP contract they'd need already exists.
 
 If you're looking for something production-hardened with a support contract, this isn't it yet. If you want to see what a memory system looks like when the databases are treated as caches and the filesystem is treated as the truth, open the vault.
 
 ## Benchmarks
 
-**[Agent Memory Benchmark](https://agentmemorybenchmark.ai)** — public, reproducible. Full `personamem/32k` split: 195 real sessions, 589 questions, Gemini 2.5 Flash for extraction/answering/judging.
+**[Agent Memory Benchmark](https://agentmemorybenchmark.ai)**: public, reproducible. Full `personamem/32k` split: 195 real sessions, 589 questions, multiple-choice (exact-letter-match scored, no LLM judge involved for this task type). Mimir's own extraction/synthesis always runs on `gemini-2.5-flash`; the table below varies only the model the *benchmark harness* uses to answer the MCQ questions, since that turned out to matter more than anything in Mimir's own retrieval pipeline.
 
-| System | Accuracy |
-|---|---|
-| Mimir | **49.4%** (291/589) |
-| Mimir — oracle mode (gold docs only, no retrieval noise) | 50.8% (299/589) |
+| Retrieval | Answer model | Accuracy |
+|---|---|---|
+| Mimir (real) | `gemini-2.5-flash-lite` (AMB harness's silent default) | 48.7% (287/589) |
+| Mimir (real) | `gemini-2.5-pro` | 46.0% (271/589) |
+| Mimir (real) | **`gemini-2.5-flash`** | **59.6% (351/589)** |
+| Oracle mode (gold docs only, zero retrieval noise) | `gemini-2.5-flash-lite` | 50.8% (299/589) |
+| Oracle mode (gold docs only, zero retrieval noise) | `gemini-2.5-flash` | 59.6% (351/589) |
 
-First number at real benchmark scale, not a cherry-picked sample. See the [live leaderboard](https://agentmemorybenchmark.ai) for how this compares to other systems on the same split. The oracle row bypasses retrieval entirely — only the gold-relevant documents get ingested, so retrieval/scoring can't lose you points. It moved the needle by 1.4 points. That's a diagnostic result, not a vanity one: it means retrieval and graph scoring are already close to their ceiling, and the real accuracy cap right now is extraction and answer-generation quality, not what gets retrieved. Roadmap below is ordered accordingly.
+Headline number is real Mimir retrieval plus `gemini-2.5-flash` answering: **59.6%**. Not cherry-picked: the table shows all three answer models tried, including the one that scored worse (`pro`). See the [live leaderboard](https://agentmemorybenchmark.ai) for how this compares to other systems (their configured answer model per-provider isn't independently verified here yet, a fairness pass on that is still open, see roadmap).
+
+The oracle-mode rows are the key diagnostic. Oracle mode bypasses retrieval entirely (only gold-relevant documents get ingested, so retrieval/graph scoring literally cannot cost you points), and under `flash` it lands at **the exact same 59.6%** as real retrieval. Under a weak answer model there was a real ~2-point retrieval gap (48.7% vs. 50.8%); under a competent one, that gap vanishes completely. In other words: Mimir's own retrieval and 4-signal graph scoring are no longer where the accuracy is being lost. The constraint moved entirely to the answer model's own reasoning quality on this benchmark's question format.
 
 ## Roadmap: closing the gap
 
-49.4% is up from a 43.3% first pass, not a finished number. Here's the actual order things are getting worked, not a wishlist:
+59.6% is up from a 43.3% first pass, not a finished number. Here's the actual order things got worked, not a wishlist:
 
-- **Shipped**: entity notes were getting created for names an LLM synthesis step returned even when that name never literally showed up in the note it was supposedly linked from — orphaned single-node clutter in the graph with no edge to anything. Fixed: only entities that actually got wikilinked get a note now. Also widened the regex entity extractor's filler-word list to cut false-positive nodes (conversational filler like "Sure", "Actually" getting mistaken for named entities).
-- **Shipped**: graph traversal was structurally dead — entity notes had no outgoing links, so hop-1/2 scoring and the LINKED NOTES prompt section never had anything to walk. Entity notes now backlink to every scene that mentions them, and two knock-on bugs (a wasted first traversal hop, multi-word entities keyed by slug instead of display text) got fixed alongside it. Also fixed a scoring bug where an exact BM25 keyword hit the vector leg missed was forced to semantic=0.0 instead of keeping its RRF-derived relevance. Together: 43.3% → 49.4%.
-- **Shipped**: ran an oracle-mode diagnostic (ingest only gold documents, bypassing retrieval noise entirely) to find out how much of the remaining gap is retrieval versus extraction/generation quality. Result: 50.8% vs. 49.4% — a 1.4-point move. Retrieval and graph scoring are already close to their ceiling; extraction and answer generation are the real cap. Reprioritized the list below accordingly.
-- **Next**: swap the regex capitalized-run entity extractor for real NER (spaCy) — the oracle result points squarely at extraction quality as the bottleneck, not retrieval, so this moves up.
-- **Next**: a real Cypher-traversable graph via [KuZu](https://kuzudb.com) once it ships Python 3.11+ wheels, replacing the current wikilink-hop-distance approximation.
-- **Then**: run the same harness against LoCoMo and LongMemEval (already wired into the eval setup) to see whether the gap is specific to personamem's question types or holds everywhere.
+- **Shipped**: entity notes were getting created for names an LLM synthesis step returned even when that name never literally showed up in the note it was supposedly linked from, orphaned single-node clutter in the graph with no edge to anything. Fixed: only entities that actually got wikilinked get a note now. Also widened the regex entity extractor's filler-word list to cut false-positive nodes (conversational filler like "Sure", "Actually" getting mistaken for named entities).
+- **Shipped**: graph traversal was structurally dead. Entity notes had no outgoing links, so hop-1/2 scoring and the LINKED NOTES prompt section never had anything to walk. Entity notes now backlink to every scene that mentions them, and two knock-on bugs (a wasted first traversal hop, multi-word entities keyed by slug instead of display text) got fixed alongside it. Also fixed a scoring bug where an exact BM25 keyword hit the vector leg missed was forced to semantic=0.0 instead of keeping its RRF-derived relevance. Together: 43.3% to 49.4%.
+- **Shipped**: ran an oracle-mode diagnostic (ingest only gold documents, bypassing retrieval noise entirely) to find out how much of the remaining gap is retrieval versus extraction/generation quality. Result at the time: 50.8% vs. 49.4%, only a 1.4-point move, so retrieval and graph scoring looked close to their ceiling. (This conclusion held up but for a different reason than expected, see below.)
+- **Shipped, no measurable win**: swapped the regex capitalized-run entity extractor for real NER (spaCy `en_core_web_sm`, optional `mimir-engine[ner]` extra, degrades to the old regex heuristic if it isn't installed). Also drops numeric/temporal entity labels (dates, quantities, money) and lowercase false positives the small model occasionally tags, neither of which are wikilink-worthy. Re-ran the full benchmark: 48.7% vs. the pre-swap 49.4%, flat, within noise, arguably slightly down. Kept the change anyway (strictly better entity quality, cleaner vault graph) but it confirmed entity/graph quality wasn't the lever.
+- **Shipped, the actual lever**: the oracle-mode diagnostic above was quietly using a weak answer model the whole time. The AMB harness silently defaults to `gemini-2.5-flash-lite` for answering benchmark questions, completely independent of what LLM Mimir itself uses for extraction. Pointed the harness's answer step at `gemini-2.5-flash` (the same tier Mimir's extraction already uses) instead: **48.7% to 59.6%**, and oracle mode moved in lockstep to the identical 59.6%. That convergence is the real finding: under a competent answer model, real Mimir retrieval and theoretically-perfect retrieval score identically, so the roughly 2-point "retrieval gap" measured earlier wasn't really about retrieval quality at all. It was retrieval quality *as a bottleneck for a weak answer model*. Also tried `gemini-2.5-pro` expecting further gains: it scored worse (46.0%), second-guessing itself on this benchmark's near-identical-paraphrase MCQ format in a way `flash` doesn't. Not a Mimir engine change; a benchmark-harness configuration fix, disclosed as exactly that.
+- **Next**: verify whether other AMB leaderboard entries are configured with a comparably competent answer model or are also sitting on a weak default. Matters for how the leaderboard comparison should be read, not addressed yet.
+- **Next**: prompt-level work on the MCQ answer step itself (more directive instructions, maybe few-shot examples) now that the answer model, not retrieval, is the known ceiling. The next accuracy gains likely live here, not in the engine.
+- **Then**: a real Cypher-traversable graph via [KuZu](https://kuzudb.com) once it ships Python 3.11+ wheels, replacing the current wikilink-hop-distance approximation. Still a legitimate architecture improvement, just no longer expected to move this particular benchmark number much.
+- **Then**: run the same harness against LoCoMo and LongMemEval (already wired into the eval setup) to see whether the retrieval-ceiling finding above holds on other question formats too, or is specific to personamem's paraphrase-heavy MCQ style.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest              # 102 tests; Redis-backed ones auto-skip without a server
+pytest              # 113 tests; Redis-backed and fastembed-backed ones auto-skip without a server/extra installed
 ```
 
 CI runs the suite on Python 3.11–3.13, on both Ubuntu and Windows — the Windows leg is not decorative, it's what caught a real timezone bug during development.
