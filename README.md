@@ -58,6 +58,10 @@ A conversation flows through: **capture** (raw turns land in DuckDB, best-effort
 
 Full diagrams and a module-by-module walkthrough: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
+Going deeper:
+- **[docs/GUIDE.html](docs/GUIDE.html)** — a code-first walkthrough of the whole system: real snippets in the order that builds understanding, the reasoning behind each design decision, and hands-on exercises. Open it in any browser; it's a single self-contained file.
+- **[docs/EVOLUTION.md](docs/EVOLUTION.md)** — where the architecture is headed: multi-tenancy, store segregation, scoring changes, and richer graph relationships.
+
 ## Quickstart
 
 ```bash
