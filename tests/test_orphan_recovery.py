@@ -102,3 +102,32 @@ def test_http_session_end_recovers_orphans_and_reports_them(tmp_path, monkeypatc
     body = resp.json()
     assert body["facts_extracted"] == 1
     assert body["recovered_sessions"] == {}
+
+
+def test_flush_survives_the_os_refusing_a_thread(monkeypatch):
+    """`ThreadPoolExecutor` raising "can't start new thread" must not lose a
+    flush. Observed for real on a loaded machine: the pool is a latency
+    optimisation over two pure functions of `turns`, so exhausting the host's
+    thread capacity has to degrade to sequential, not fail the session.
+    """
+    import concurrent.futures
+
+    pipeline.capture("t1", "u-threads", "session-thread-pressure", [
+        {"role": "user", "content": "I keep my bike in the hallway"},
+    ])
+
+    class _RefusesThreads:
+        def __enter__(self):
+            raise RuntimeError("can't start new thread")
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        concurrent.futures, "ThreadPoolExecutor", lambda *a, **k: _RefusesThreads()
+    )
+
+    result = pipeline.flush_session("t1", "u-threads", "session-thread-pressure")
+
+    assert result is not None, "a busy host must not cost us the whole session"
+    assert result["scene_id"]

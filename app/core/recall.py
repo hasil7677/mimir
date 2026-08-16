@@ -68,6 +68,20 @@ def _fact_graph_hops(content: str, entity_hops: dict[str, int]) -> int | None:
     return min(found) if found else None
 
 
+def _search_mode(hybrid_used: bool, vector_used: bool) -> str:
+    """Which of the three retrieval paths actually ran, for the record.
+
+    Every leg here degrades silently by design (that's the point of the
+    pipeline), which is exactly what makes this worth reporting: a run that
+    quietly spent the whole benchmark on the keyword-only path looks
+    identical, from the outside, to one that used hybrid search badly. Only
+    one of those is a ranking problem.
+    """
+    if hybrid_used:
+        return "hybrid_qdrant"
+    return "legacy_rrf" if vector_used else "keyword_only"
+
+
 def recall(tenant_id: str, user_id: str, query: str, session_id: str | None = None) -> dict:
     # 0. Semantic cache intercept: embed once (reused by the vector leg),
     # exact-hash hit needs no embeddings at all.
@@ -87,7 +101,11 @@ def recall(tenant_id: str, user_id: str, query: str, session_id: str | None = No
         cached_ids = [m["id"] for m in cached.get("memories", [])]
         if cached_ids:
             l1_store.bump_access(cached_ids)
-        return {**cached, "cache_hit": True}
+        # search_mode is overwritten rather than left as whatever the cached
+        # payload recorded: these fields describe what this call did, and this
+        # call did no search at all. The originating run's mode is still on
+        # record in that run's own result.
+        return {**cached, "cache_hit": True, "search_mode": "cache", "fts_mode": l1_store.fts_mode()}
 
     # 1. Hot memory: recent turns, verbatim, unscored (degrades to empty).
     hot_turns: list[dict] = []
@@ -144,6 +162,8 @@ def recall(tenant_id: str, user_id: str, query: str, session_id: str | None = No
             "context_string": _assemble(hot_turns, [], {}, profile),
             "memories": [], "hot_turns": len(hot_turns),
             "vector_used": vector_used, "cache_hit": False,
+            "search_mode": _search_mode(hybrid_used, vector_used),
+            "fts_mode": l1_store.fts_mode(),
         }
 
     # 3. RRF merge — only for the legacy path. Qdrant already returned one
@@ -218,6 +238,15 @@ def recall(tenant_id: str, user_id: str, query: str, session_id: str | None = No
         "context_string": context_string,
         "memories": kept, "hot_turns": len(hot_turns),
         "vector_used": vector_used, "cache_hit": False,
+        "search_mode": _search_mode(hybrid_used, vector_used),
+        "fts_mode": l1_store.fts_mode(),
+        # How much survived each narrowing step. `candidates_considered` is
+        # pre-threshold, len(kept) is post-threshold-and-cap, and context_chars
+        # is what the reader model actually receives after _assemble's char
+        # budget trims the tail — three different places a needed fact can be
+        # dropped, previously indistinguishable from each other downstream.
+        "candidates_considered": len(scored),
+        "context_chars": len(context_string),
     }
     semantic_cache.put(tenant_id, user_id, query, query_vector, result)
     return result

@@ -39,6 +39,44 @@ def _isolated_duckdb_per_test(monkeypatch):
     monkeypatch.setattr(duckdb_client, "_conn", None)
 
 
+_TEST_REDIS_DB = 15
+
+
+@pytest.fixture(autouse=True)
+def _isolated_redis(monkeypatch):
+    """Point tests at a dedicated Redis logical DB and empty it per test.
+
+    DuckDB and Qdrant get a fresh path per test; Redis had no equivalent. That
+    was invisible for as long as no Redis was running — every cache lookup
+    missed, so nothing leaked. On a machine where Redis IS up, the semantic
+    cache keys on nothing but (tenant, user, normalized query), all of which
+    tests reuse freely: a response cached by an earlier test run gets served
+    to a later one, carrying fact ids pointing into a DuckDB file that no
+    longer exists. Two tests failed exactly that way, while passing in CI.
+
+    Using db 15 rather than flushing the default keeps a developer's own
+    `~/.mimir` hot turns and cached queries intact while the suite runs.
+    """
+    parsed = urlparse(settings.storage.redis.url)
+    test_url = f"redis://{parsed.hostname or 'localhost'}:{parsed.port or 6379}/{_TEST_REDIS_DB}"
+    monkeypatch.setattr(settings.storage.redis, "url", test_url)
+
+    from app.db import redis_client
+
+    monkeypatch.setattr(redis_client, "_client", None)
+
+    def _flush():
+        try:
+            redis_client.get_redis().flushdb()
+        except Exception:
+            pass  # no Redis reachable: nothing was cached, nothing to clear
+
+    _flush()
+    yield
+    _flush()
+    monkeypatch.setattr(redis_client, "_client", None)
+
+
 @pytest.fixture(autouse=True)
 def _isolated_qdrant(tmp_path, monkeypatch):
     """Embedded Qdrant holds a file lock per path — every test gets a fresh

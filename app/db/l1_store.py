@@ -19,6 +19,22 @@ logger = logging.getLogger(__name__)
 _fts_state = {"available": None, "dirty": True}
 
 
+def fts_mode() -> str:
+    """Which keyword-search implementation is actually live: "bm25" once
+    DuckDB's fts extension has loaded, "sql_fallback" if it failed to, or
+    "unknown" before the first search has forced the question.
+
+    Deliberately read-only — it never runs the INSTALL/LOAD probe itself, so
+    calling it from a diagnostics path can't decide which mode a later search
+    ends up taking. The distinction matters because the fallback is a plain
+    term-presence count, not a relevance ranking: tuning retrieval while
+    silently on it means tuning the wrong thing entirely.
+    """
+    if _fts_state["available"] is None:
+        return "unknown"
+    return "bm25" if _fts_state["available"] else "sql_fallback"
+
+
 def insert_fact(
     fact_id: str,
     user_id: str,
@@ -51,7 +67,17 @@ def _fts_ready() -> bool:
             conn.execute("INSTALL fts; LOAD fts;")
             _fts_state["available"] = True
         except Exception:
-            logger.warning("duckdb fts extension unavailable — falling back to SQL term scoring")
+            # ERROR, not WARNING: this silently swaps real BM25 ranking for a
+            # term-presence count for the entire life of the process. It reads
+            # like a minor degradation in a log and behaves like a retrieval
+            # rewrite — it has to be impossible to scroll past, and it's
+            # mirrored into every recall result as fts_mode for the same reason.
+            logger.error(
+                "duckdb fts extension failed to load — keyword search has DEGRADED to "
+                "SQL term counting, not BM25. Retrieval quality is affected for the rest "
+                "of this process; recall results will report fts_mode='sql_fallback'.",
+                exc_info=True,
+            )
             _fts_state["available"] = False
     if _fts_state["available"] and _fts_state["dirty"]:
         conn.execute("PRAGMA create_fts_index('l1_memories', 'id', 'content', overwrite=1)")

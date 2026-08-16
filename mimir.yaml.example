@@ -46,12 +46,23 @@ embedding:
   fastembed_cache_dir: "~/.mimir/models"
 
 llm:
-  provider: "openai"
+  provider: "openai"  # "openai" (any OpenAI-compatible endpoint) | "vertex"
   base_url: "https://api.openai.com/v1"
   api_key: "${OPENAI_API_KEY}"
   model: "gpt-4o-mini"
   extraction_model: ""
   timeout_ms: 30000
+  # Reasoning/thinking models bill their thinking against the SAME output
+  # budget the answer has to fit in. Left on, a 2000-token budget can spend
+  # 1900+ tokens thinking and truncate the real response mid-sentence — which
+  # returns HTTP 200, so it fails silently. Every task this engine asks an LLM
+  # to do is structured enumeration rather than reasoning, so 0 is the default.
+  #   0  = thinking disabled
+  #   >0 = explicit thinking budget in tokens
+  #   <0 = omit the setting and let the model decide
+  # Vertex only; on OpenAI-compatible endpoints truncation is detected and
+  # logged either way. Also settable as MIMIR_THINKING_BUDGET.
+  thinking_budget: 0
 
 pipeline:
   l1_every_n_turns: 5
@@ -62,19 +73,28 @@ pipeline:
 
 recall:
   strategy: "hybrid"  # "hybrid" | "vector" | "keyword" | "graph"
-  max_results: 5
+  max_results: 10
   recall_threshold: 0.30
   cache_threshold: 0.92
-  max_context_chars: 4000
+  max_context_chars: 6000
   weights:
     semantic: 0.45
     frequency: 0.20
     recency: 0.25
     graph: 0.10
+  # exp(-decay_rate * age_days). 0.05 halves a fact's recency signal in about
+  # 14 days, which is what you want for an assistant where recent context
+  # genuinely matters more. Set to 0.0 to switch decay off — worth doing for
+  # multi-session evaluation sets where every session is equally relevant
+  # (measured +6.3 points on personamem/32k, p=0.012).
   decay_rate: 0.05
 
 extraction:
-  max_memories_per_session: 20
+  # A dense 32k-token session legitimately yields 26-32 atomic facts, so 20
+  # silently discarded the tail. Raised once an extraction truncation bug was
+  # fixed — before that, sessions were landing one fact each and this cap had
+  # never bound on anything.
+  max_memories_per_session: 50
   min_priority: 50
   enable_dedup: true
   enable_entity_extraction: true

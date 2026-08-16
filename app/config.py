@@ -1,9 +1,12 @@
+import logging
 import os
 import re
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
@@ -83,6 +86,17 @@ class LlmConfig(BaseModel):
     model: str = "gpt-4o-mini"
     extraction_model: str = ""
     timeout_ms: int = 30000
+    # Gemini 2.5 models think by default, and on the Vertex API those thinking
+    # tokens are charged against maxOutputTokens — the same budget the actual
+    # answer has to fit in. Measured on a real 60k-char session: 1918 of a
+    # 2000-token budget went to thinking, leaving 78 tokens, which truncated
+    # the extraction JSON after a single fact object. Same session with
+    # thinking off: 44 facts. Every task this engine asks an LLM to do is
+    # structured enumeration, not reasoning, so 0 is the right default.
+    #   0  = disabled (default)
+    #   >0 = explicit token budget for thinking
+    #   <0 = omit the field entirely and let the model decide
+    thinking_budget: int = 0
 
 
 class PipelineConfig(BaseModel):
@@ -119,7 +133,12 @@ class RecallConfig(BaseModel):
 
 
 class ExtractionConfig(BaseModel):
-    max_memories_per_session: int = 20
+    # Was 20, which never bound on anything: a truncation bug meant sessions
+    # were landing a single fact each, so the cap was unreachable. With that
+    # fixed, real 32k-token sessions extract 26-32 facts and 20 silently
+    # discarded the tail — and the tail is ordered by nothing in particular,
+    # so it was not dropping the least useful ones.
+    max_memories_per_session: int = 50
     min_priority: int = 50
     enable_dedup: bool = True
     enable_entity_extraction: bool = True
@@ -163,6 +182,37 @@ def _substitute_env_vars(raw_yaml: str) -> str:
     return _ENV_VAR_PATTERN.sub(lambda m: os.environ.get(m.group(1), ""), raw_yaml)
 
 
+# Direct environment overrides for the handful of knobs that get swept rather
+# than configured. `${VAR}` substitution already covers secrets, but it only
+# works for values a yaml file already mentions — so varying one parameter
+# across runs meant writing a whole config file per run, or reaching in and
+# mutating `settings` after import (which is what this project's own eval
+# scripts were reduced to doing). These apply with or without a config file,
+# and always win over it: an explicit env var is a deliberate act.
+_ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
+    "MIMIR_DECAY_RATE": ("recall", "decay_rate", float),
+    "MIMIR_MAX_RESULTS": ("recall", "max_results", int),
+    "MIMIR_RECALL_THRESHOLD": ("recall", "recall_threshold", float),
+    "MIMIR_MAX_CONTEXT_CHARS": ("recall", "max_context_chars", int),
+    "MIMIR_MIN_PRIORITY": ("extraction", "min_priority", int),
+    "MIMIR_THINKING_BUDGET": ("llm", "thinking_budget", int),
+}
+
+
+def _apply_env_overrides(config: MimirConfig) -> MimirConfig:
+    for env_var, (section, field, caster) in _ENV_OVERRIDES.items():
+        raw = os.environ.get(env_var)
+        if raw is None or raw == "":
+            continue
+        try:
+            setattr(getattr(config, section), field, caster(raw))
+        except (ValueError, TypeError):
+            # A malformed override is a typo in a sweep script, not a reason to
+            # refuse to boot — the documented default still applies.
+            logger.warning("ignoring %s=%r — not a valid %s", env_var, raw, caster.__name__)
+    return config
+
+
 def load_config(path: str | None = None) -> MimirConfig:
     """Local-first by design: if no config file is found, every setting falls
     back to its documented default and the gateway still boots — a config
@@ -170,12 +220,12 @@ def load_config(path: str | None = None) -> MimirConfig:
     """
     config_path = Path(path or os.environ.get("MIMIR_CONFIG", "mimir.yaml"))
     if not config_path.exists():
-        return MimirConfig()
+        return _apply_env_overrides(MimirConfig())
 
     raw = config_path.read_text()
     substituted = _substitute_env_vars(raw)
     data = yaml.safe_load(substituted) or {}
-    return MimirConfig(**data)
+    return _apply_env_overrides(MimirConfig(**data))
 
 
 settings = load_config()

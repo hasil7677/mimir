@@ -90,10 +90,14 @@ def extract_facts(turns: list[dict]) -> tuple[list[dict], str]:
     extraction.min_priority are discarded (spec: immediately, at the source)."""
     transcript = "\n".join(f"{t.get('role', 'user')}: {t['content']}" for t in turns)
     try:
-        # 2000 not 800: a detailed session can generate enough facts that 800
-        # truncates the response mid-array — see _parse_facts_resilient for
-        # why that used to lose everything, not just the tail.
-        raw = chat(_L1_PROMPT.format(transcript=transcript), max_tokens=2000)
+        # 8000 not 2000: 2000 was set when the only thing competing for the
+        # budget was the answer itself. It still truncated — measured on a
+        # 60k-char session, thinking-disabled extraction hit the 2000 cap at
+        # 32 facts and ran to a natural stop at 44 when given room. Facts are
+        # ~60 tokens each, so a dense session legitimately needs several
+        # thousand tokens of output and truncation costs whole facts, not
+        # formatting.
+        raw = chat(_L1_PROMPT.format(transcript=transcript), max_tokens=8000)
         parsed = _parse_facts_resilient(raw)
         if not parsed:
             raise ValueError("no parseable fact objects in LLM output")

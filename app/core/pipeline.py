@@ -52,11 +52,23 @@ def flush_session(tenant_id: str, user_id: str, session_id: str) -> dict | None:
     # per-session cost running well behind comparable systems: running them
     # concurrently instead removes one full LLM round-trip from the
     # critical path with no change in behavior or output.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        synthesis_future = pool.submit(synthesis.synthesize_scene, turns)
-        extraction_future = pool.submit(extraction.extract_facts, turns)
-        title, note_body, entities, mode = synthesis_future.result()
-        extracted, extraction_mode = extraction_future.result()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            synthesis_future = pool.submit(synthesis.synthesize_scene, turns)
+            extraction_future = pool.submit(extraction.extract_facts, turns)
+            title, note_body, entities, mode = synthesis_future.result()
+            extracted, extraction_mode = extraction_future.result()
+    except RuntimeError:
+        # "can't start new thread" — the OS refused, because the host is out
+        # of thread capacity (seen for real on a loaded dev box running the
+        # test suite alongside a benchmark). Parallelism here is a latency
+        # optimisation, not a requirement: both calls are pure functions of
+        # `turns`. Losing a flush entirely because the machine was busy would
+        # break the degrade-never-fail contract every other dependency in this
+        # pipeline honours, so fall back to running them one after the other.
+        logger.warning("thread pool unavailable — running synthesis and extraction sequentially")
+        title, note_body, entities, mode = synthesis.synthesize_scene(turns)
+        extracted, extraction_mode = extraction.extract_facts(turns)
 
     scene_id = f"scene_{uuid.uuid4().hex[:8]}"
     note_path = vault.write_scene(
@@ -102,6 +114,16 @@ def flush_session(tenant_id: str, user_id: str, session_id: str) -> dict | None:
     duckdb_client.log_audit(
         str(uuid.uuid4()), user_id, tenant_id, "scene_write",
         [scene_id, *fact_ids], now, {"mode": mode, "extraction": extraction_mode},
+    )
+    # The audit row above records this per session, but reading it back means
+    # querying DuckDB after the fact. Callers that drive thousands of sessions
+    # (benchmark providers) typically discard flush_session's return value
+    # entirely, so an extraction step that quietly fell back to `verbatim` for
+    # every session — or landed 0 facts — leaves no trace in their logs at all.
+    # One INFO line per flush makes both visible while the run is happening.
+    logger.info(
+        "flush session=%s extraction_mode=%s facts_extracted_count=%d synthesis=%s vector_indexed=%s",
+        session_id, extraction_mode, len(fact_ids), mode, vector_indexed,
     )
     return {
         "scene_id": scene_id, "note": note_path.name, "synthesis": mode,
