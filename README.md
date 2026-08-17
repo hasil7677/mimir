@@ -65,21 +65,30 @@ Going deeper:
 ## Quickstart
 
 ```bash
-git clone https://github.com/hasil7677/mimir.git
-cd mimir
-pip install -e ".[dev]"
-uvicorn app.main:app --port 8080
+pip install mimir-engine
+mimir serve --port 8080
 ```
 
-That's it — `GET /health` works with zero config. No `mimir.yaml`, no Redis, no API key required. Copy `mimir.yaml.example` to `mimir.yaml` when you want to point at a local Ollama model, a cloud LLM, or a Redis instance; every setting has a sane default until then.
+That's it — `GET /health` works with zero config. No `mimir.yaml`, no Redis, no API key required. Grab `mimir.yaml.example` from the repo when you want to point at a local Ollama model, a cloud LLM, or a Redis instance; every setting has a sane default until then.
+
+Working on the engine itself (contributing, running the test suite)? Use a checkout instead:
+
+```bash
+git clone https://github.com/hasil7677/mimir.git
+cd mimir/engine
+pip install -e ".[dev]"
+uvicorn app.main:app --port 8080   # same as `mimir serve`, but picks up local edits
+```
 
 ## Use it from Claude Code (or any MCP client) right now
 
 ```bash
-claude mcp add mimir --scope user -e MIMIR_USER_ID=you -- python /path/to/mimir/adapters/mcp_embedded.py
+claude mcp add mimir --scope user -e MIMIR_USER_ID=you -- mimir mcp
 ```
 
 No gateway to run — the embedded adapter imports the engine directly, so a process only exists while your agent session is open. Three tools show up: `mimir_recall`, `mimir_remember`, `mimir_flush`. Point your `CLAUDE.md` at them and your agent starts building a memory of you, one conversation at a time.
+
+Running more than one agent session at once? DuckDB and embedded Qdrant are single-writer, so start the gateway (`mimir serve`) and point every client at `mimir mcp --gateway` instead — same tools, same files, no lock contention.
 
 Also documented: OpenCode (native MCP), Pi (via the community `pi-mcp-adapter`), and a plain HTTP contract for anything else — see **[docs/CLIENTS.md](docs/CLIENTS.md)**.
 

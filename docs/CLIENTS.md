@@ -4,9 +4,10 @@ Mimir speaks MCP, so any MCP-capable agent can use the same brain. Two adapter
 modes, same three tools (`mimir_recall`, `mimir_remember`, `mimir_flush`),
 same files on disk:
 
-- **Embedded** (`adapters/mcp_embedded.py`) — no server, the agent spawns the
-  process per session. Use this when ONE agent runs at a time.
-- **Gateway** (`adapters/mcp_server.py` + `uvicorn app.main:app --port 8080`) —
+- **Embedded** (`mimir mcp`, or `adapters/mcp_embedded.py` from a checkout) —
+  no server, the agent spawns the process per session. Use this when ONE agent
+  runs at a time.
+- **Gateway** (`mimir mcp --gateway`, run against `mimir serve --port 8080`) —
   use this when you want MULTIPLE agents open simultaneously. DuckDB and
   embedded Qdrant are single-writer, so two embedded sessions against the same
   `~/.mimir` will hit a file lock; the gateway serializes access for everyone.
@@ -15,12 +16,16 @@ Rule of thumb: start embedded everywhere. The day you actually run Claude Code
 and OpenCode at the same moment and see a lock error, start the gateway and
 flip your configs to the gateway adapter. Nothing about your data changes.
 
+Every command below shows `mimir mcp` (from `pip install mimir-engine`). If
+you're working from a git checkout instead, substitute
+`python <abs-path-to-mimir-engine>/adapters/mcp_embedded.py` — same tool, same files.
+
 ---
 
 ## Claude Code
 
 ```
-claude mcp add mimir --scope user -e MIMIR_USER_ID=you -- python <abs-path-to-mimir-engine>\adapters\mcp_embedded.py
+claude mcp add mimir --scope user -e MIMIR_USER_ID=you -- mimir mcp
 ```
 
 Pair it with a `~/.claude/CLAUDE.md` section telling sessions when to
@@ -36,7 +41,7 @@ Add to `opencode.json` (project) or `~/.config/opencode/opencode.json` (global):
   "mcp": {
     "mimir": {
       "type": "local",
-      "command": ["python", "<abs-path-to-mimir-engine>/adapters/mcp_embedded.py"],
+      "command": ["mimir", "mcp"],
       "enabled": true,
       "environment": { "MIMIR_USER_ID": "you" }
     }
@@ -57,7 +62,7 @@ single ~200-token proxy tool. Install it, then in `~/.pi/agent/mcp.json`:
 {
   "servers": {
     "mimir": {
-      "command": ["python", "<abs-path-to-mimir-engine>/adapters/mcp_embedded.py"],
+      "command": ["mimir", "mcp"],
       "env": { "MIMIR_USER_ID": "you" }
     }
   },
