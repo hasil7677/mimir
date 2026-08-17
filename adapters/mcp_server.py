@@ -19,13 +19,13 @@ import os
 import uuid
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 MIMIR_URL = os.environ.get("MIMIR_URL", "http://127.0.0.1:8080")
 MIMIR_USER_ID = os.environ.get("MIMIR_USER_ID", "local-user")
 _SESSION_ID = f"mcp_{uuid.uuid4().hex[:8]}"  # one session per adapter process
 
-mcp = FastMCP("mimir")
+mcp = MCPServer("mimir")
 
 
 def _post(path: str, payload: dict) -> dict:

@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import functools
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from app.core import pipeline, recall as recall_pipeline
 
@@ -36,7 +36,7 @@ TENANT = "local"  # embedded mode is single-tenant by definition
 USER_ID = os.environ.get("MIMIR_USER_ID", "local-user")
 _SESSION_ID = f"mcp_{uuid.uuid4().hex[:8]}"  # one session per adapter process
 
-mcp = FastMCP("mimir")
+mcp = MCPServer("mimir")
 
 _LOCKED_MESSAGE = (
     "Mimir's local store is held by another running session (DuckDB/Qdrant are "

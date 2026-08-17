@@ -1,0 +1,45 @@
+name: publish
+
+# Fires on a GitHub Release, not every push to main — cutting a release is
+# the deliberate "ship this version" act; main can move without publishing.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mimir-engine
+    permissions:
+      # Trusted publishing (OIDC) — no PyPI API token stored as a secret.
+      # Requires the "pypi" environment to be registered as a trusted
+      # publisher for this repo at pypi.org/manage/project/mimir-engine/settings/publishing/
+      # (or pre-registered before the first publish, since the project
+      # doesn't exist on PyPI yet).
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
