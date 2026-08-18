@@ -30,7 +30,7 @@ Mimir is a memory engine that fixes this **without asking you to run anything.**
 
 | | |
 |---|---|
-| **Public benchmark** | [Agent Memory Benchmark](https://agentmemorybenchmark.ai), `personamem/32k`: **47.7%** (281/589). Corrects a previously published 59.6% — [what went wrong ↓](#benchmarks) |
+| **Public benchmark** | [Agent Memory Benchmark](https://agentmemorybenchmark.ai), `personamem/32k`: **62.1%** (366/589), full split, extraction fix + `decay_rate=0.0` — [how we got here ↓](#benchmarks) |
 | **Setup** | `pip install -e ".[dev]"` — that's it, no server, no API key |
 | **Talks to** | Claude Code / any MCP client, or a plain HTTP contract for everything else |
 
@@ -101,7 +101,7 @@ hybrid recall with a 4-signal scoring formula · semantic caching with measured 
 
 **Known gaps, not hidden:**
 - No real graph database yet. [KuZu](https://kuzudb.com) has no Python 3.11+ wheels as of this writing, so entity relationships live as vault `[[wikilinks]]` with hop-distance scoring instead of a Cypher-traversable graph. The scoring interface is already hop-based, so KuZu slots in without a rewrite once it's installable.
-- Accuracy is well short of the top of the benchmark: 47.7% against 81.8% to 86.6% for the three published entries on the same split. An oracle test (perfect memory, nothing dropped) scores ~75% on this split, so most of that gap is not something better retrieval can close. See [Benchmarks](#benchmarks) for the numbers and the caveats on comparing them.
+- Accuracy is well short of the top of the benchmark: 62.1% against 81.8% to 86.6% for the three published entries on the same split. An oracle test (perfect memory, nothing dropped) scores ~75% on this split, so most of that gap is not something better retrieval can close. See [Benchmarks](#benchmarks) for the numbers and the caveats on comparing them.
 - LangChain / OpenAI Agents adapters aren't built. The HTTP contract they'd need already exists.
 
 If you're looking for something production-hardened with a support contract, this isn't it yet. If you want to see what a memory system looks like when the databases are treated as caches and the filesystem is treated as the truth, open the vault.
@@ -118,7 +118,11 @@ If you're looking for something production-hardened with a support contract, thi
 >
 > The arithmetic is exact. `gemini-2.5-flash-lite` answered all 589 and got **287** right. `gemini-2.5-flash` was then run on only the 302 it missed, and got **64** of those right. 287 + 64 = **351** — the published "59.6%". No single configuration ever scored it.
 >
-> Re-run cleanly, every question answered once by one model, the real number is **47.7%**. Everything below is corrected. The engine improvements are unaffected — those were always measured flash-lite against flash-lite.
+> Re-run cleanly, every question answered once by one model, the real number was **47.7%**. Everything below is corrected. The engine improvements are unaffected — those were always measured flash-lite against flash-lite.
+
+> ### Update (2026-08-18) — full split re-run with the extraction fix
+>
+> The table right below captures the answer-model comparison as it stood at the correction above — it's still the right read on *answer model choice*, but the retrieval store behind it predates the real fix (see [What was actually wrong ↓](#what-was-actually-wrong-extraction-was-landing-one-fact-per-session)). With that bug fixed and `decay_rate: 0.0` applied (the config found to help in the [retrieval sweep ↓](#retrieval-parameters-swept-against-a-store-that-finally-had-facts-in-it)), a clean full-589-question run — same questions, same answer model (`gemini-2.5-flash`) — scores **62.1% (366/589)**, up from **47.7% (281/589)** paired on the identical 589 questions: **+14.4 points, +85 questions flipped correct**. This is now the current headline number, and it lands inside the 58.0%–64.3% range measured on the 143-question subset further down, which is exactly the sanity check this run was for.
 
 | Retrieval | Answer model | Accuracy |
 |---|---|---|
@@ -131,7 +135,7 @@ If you're looking for something production-hardened with a support contract, thi
 ¹ produced by the same failed-only method described above, so it is an upper bound; a clean re-run has not been done.
 ² 150-question stratified sample, not the full split. Projected onto the full question-type mix: **~75%**.
 
-Headline number is real Mimir retrieval plus `gemini-2.5-flash` answering: **47.7%**.
+Superseded by the update above: the current headline is **62.1%** (post-extraction-fix, `decay_rate=0.0`). The table's row is the pre-fix retrieval store, kept because it's what the answer-model comparison above was actually measuring.
 
 ### The answer model does not matter much — that was the error
 
@@ -148,11 +152,13 @@ The three published entries on this split, from the benchmark's own `results-man
 | hindsight | 86.6% | 15,812 |
 | hybrid-search | 84.4% | 24,169 |
 | cognee | 81.8% | 11,848 |
-| **Mimir** | **47.7%** | **178** |
+| **Mimir** | **62.1%** | **~489¹** |
 
-No rank is being claimed from this. Those three ran in a `single-query` response mode that isn't registered in the installed harness (which offers `rag`, `agentic-rag`, and `agent`), and their answer-model configuration hasn't been verified. Treat it as orientation, not a leaderboard position: Mimir is roughly 34 to 39 points behind the top, and that gap is real regardless of how the caveats resolve.
+¹ estimated: the full re-run measured 2,406 avg context *characters* per query directly; converted to tokens using the ~4.92 chars/token ratio the harness itself reported for the pre-fix run (875.68 chars → 178 tokens) rather than a generic chars/4 guess. Not independently re-measured in tokens.
 
-The context column is the most interesting thing in that table. Mimir ships about **178 tokens per query** where the leaders ship 11,800 to 24,200. That is a 60x to 135x difference in how much material the answer model gets to reason over.
+No rank is being claimed from this. Those three ran in a `single-query` response mode that isn't registered in the installed harness (which offers `rag`, `agentic-rag`, and `agent`), and their answer-model configuration hasn't been verified. Treat it as orientation, not a leaderboard position: Mimir is roughly 20 to 25 points behind the top, and that gap is real regardless of how the caveats resolve.
+
+The context column is still the most interesting thing in that table. Mimir ships an estimated ~489 tokens per query where the leaders ship 11,800 to 24,200 — roughly 24x to 49x less material for the answer model to reason over, even after the extraction fix more than tripled how much gets retrieved.
 
 ### The ceiling, and where the remaining gap actually is
 
@@ -236,13 +242,13 @@ Two findings, both significant, pointing opposite ways.
 
 That kills the parameter recommendations this project had been carrying (`max_results` 15–20, `threshold` 0.15–0.20, `max_context_chars` 12000). All three are wrong here, and the honest reading is that recall should get *tighter*, not wider, once the facts are good.
 
-Best measured configuration is the extraction fix plus `decay_rate: 0.0`, everything else at defaults: **46.2% → 64.3% on this subset**, against a 70.7% perfect-memory ceiling.
+Best measured configuration is the extraction fix plus `decay_rate: 0.0`, everything else at defaults: **46.2% → 64.3% on this subset**, against a 70.7% perfect-memory ceiling. Confirmed on the full 589-question split at that same configuration: **62.1% (366/589)**, up from the pre-fix **47.7% (281/589)** paired on the identical questions — inside the subset's 58.0–64.3% range, as expected.
 
 Sample-size caveat, stated plainly: n=143 means the 95% interval on any single accuracy number here is roughly ±8 points. The paired McNemar tests above are what the claims rest on, not the point estimates — two configurations that differ only trivially in what they retrieve (`top20` and `wide`) disagree on just 9 of 143 questions, which is the noise floor made visible.
 
 ## Roadmap: closing the gap
 
-47.7% is up from a 43.3% first pass, not a finished number. Measured like-for-like — flash-lite throughout, which is how the engine changes were always evaluated — that progression is 43.3% → 48.7%. Here's the actual order things got worked, not a wishlist:
+62.1% is up from a 43.3% first pass, not a finished number. Measured like-for-like — flash-lite throughout, which is how the engine changes were always evaluated — that progression is 43.3% → 48.7%. Here's the actual order things got worked, not a wishlist:
 
 - **Shipped**: entity notes were getting created for names an LLM synthesis step returned even when that name never literally showed up in the note it was supposedly linked from, orphaned single-node clutter in the graph with no edge to anything. Fixed: only entities that actually got wikilinked get a note now. Also widened the regex entity extractor's filler-word list to cut false-positive nodes (conversational filler like "Sure", "Actually" getting mistaken for named entities).
 - **Shipped**: graph traversal was structurally dead. Entity notes had no outgoing links, so hop-1/2 scoring and the LINKED NOTES prompt section never had anything to walk. Entity notes now backlink to every scene that mentions them, and two knock-on bugs (a wasted first traversal hop, multi-word entities keyed by slug instead of display text) got fixed alongside it. Also fixed a scoring bug where an exact BM25 keyword hit the vector leg missed was forced to semantic=0.0 instead of keeping its RRF-derived relevance. Together: 43.3% to 49.4%.
@@ -251,7 +257,7 @@ Sample-size caveat, stated plainly: n=143 means the 95% interval on any single a
 - **Retracted**: this list previously claimed that repointing the harness's answer model from `flash-lite` to `flash` was "the actual lever," worth 48.7% → 59.6%. It isn't. That gain was a measurement artifact, and a clean re-run puts `flash` at 47.7% — a tie with the default. Full explanation under [Benchmarks](#benchmarks). The `pro` result quoted alongside it came from the same flawed method and has not been cleanly re-run either.
 - **Shipped**: measured the real ceiling by handing the answer model the gold session text directly, bypassing extraction and retrieval entirely. Perfect memory scores 70.7% where real retrieval scores 50.0% on the same questions. That bounds every remaining memory improvement at about 21 points and puts the achievable target near 75%, not 80%+.
 - **Shipped, the actual lever**: extraction was silently truncated to one fact per session by Gemini thinking tokens eating the output budget. Fixed; 1.5 → 25.1 facts per session, and **+11.9 points** on a paired 143-question re-ingest. Full write-up under [Benchmarks](#what-was-actually-wrong-extraction-was-landing-one-fact-per-session). This is what every earlier retrieval-shaped hypothesis was actually running into.
-- **Next**: re-run the full 589-question split with the fix in place, to replace the 47.7% headline with a real full-split number rather than a subset projection.
+- **Shipped**: re-ran the full 589-question split with the fix and `decay_rate: 0.0` in place, replacing the 47.7% headline: **62.1% (366/589)**, up from **47.7% (281/589)** paired on the identical questions (+14.4 points). Lands inside the 58.0%–64.3% range measured on the 143-question subset — the sanity check this run was for.
 - **Shipped**: swept retrieval parameters now that the store actually holds facts. `decay_rate: 0.0` is worth **+6.3 points** (p=0.012) on a multi-session benchmark where every session is equally relevant; no code change needed, it was already config-driven. Widening `max_results` 10 → 20 *costs* **8.4 points** (p=0.012), which retires the wider-window/lower-threshold recommendations this project had been carrying.
 - **Next**: the remaining ~6 points between 64.3% and the 70.7% perfect-memory ceiling. Given that loosening retrieval hurt, the promising direction is tightening it — better ranking rather than more results.
 - **Next**: `min_priority` (currently 50) and chunked extraction are the two untested extraction-side ideas. Both change what gets stored, so both need a fresh ingest to evaluate.
