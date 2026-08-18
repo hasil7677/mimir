@@ -30,7 +30,7 @@ Mimir is a memory engine that fixes this **without asking you to run anything.**
 
 | | |
 |---|---|
-| **Public benchmark** | [Agent Memory Benchmark](https://agentmemorybenchmark.ai), `personamem/32k`: **62.1%** (366/589), full split, extraction fix + `decay_rate=0.0`. [How we got here ↓](#benchmarks) |
+| **Public benchmark** | [Agent Memory Benchmark](https://agentmemorybenchmark.ai), `personamem/32k`, run through their own harness end-to-end: **51.3%** (302/589). [How we got here ↓](#benchmarks) |
 | **Setup** | `pip install -e ".[dev]"`: that's it, no server, no API key |
 | **Talks to** | Claude Code / any MCP client, or a plain HTTP contract for everything else |
 
@@ -101,7 +101,7 @@ hybrid recall with a 4-signal scoring formula · semantic caching with measured 
 
 **Known gaps, not hidden:**
 - No real graph database yet. [KuZu](https://kuzudb.com) has no Python 3.11+ wheels as of this writing, so entity relationships live as vault `[[wikilinks]]` with hop-distance scoring instead of a Cypher-traversable graph. The scoring interface is already hop-based, so KuZu slots in without a rewrite once it's installable.
-- Accuracy is well short of the top of the benchmark: 62.1% against 81.8% to 86.6% for the three published entries on the same split. An oracle test (perfect memory, nothing dropped) scores ~75% on this split, so most of that gap is not something better retrieval can close. See [Benchmarks](#benchmarks) for the numbers and the caveats on comparing them.
+- Accuracy is well short of the top of the benchmark: 51.3% against 81.8% to 86.6% for the three published entries on the same split. An oracle test (perfect memory, nothing dropped) scores ~75% on this split, so most of that gap is not something better retrieval can close. See [Benchmarks](#benchmarks) for the numbers and the caveats on comparing them.
 - LangChain / OpenAI Agents adapters aren't built. The HTTP contract they'd need already exists.
 
 If you're looking for something production-hardened with a support contract, this isn't it yet. If you want to see what a memory system looks like when the databases are treated as caches and the filesystem is treated as the truth, open the vault.
@@ -122,7 +122,13 @@ If you're looking for something production-hardened with a support contract, thi
 
 > ### Update (2026-08-18): full split re-run with the extraction fix
 >
-> The table right below captures the answer-model comparison as it stood at the correction above; it's still the right read on *answer model choice*, but the retrieval store behind it predates the real fix (see [What was actually wrong ↓](#what-was-actually-wrong-extraction-was-landing-one-fact-per-session)). With that bug fixed and `decay_rate: 0.0` applied (the config found to help in the [retrieval sweep ↓](#retrieval-parameters-swept-against-a-store-that-finally-had-facts-in-it)), a clean full-589-question run (same questions, same answer model `gemini-2.5-flash`) scores **62.1% (366/589)**, up from **47.7% (281/589)** paired on the identical 589 questions: **+14.4 points, +85 questions flipped correct**. This is now the current headline number, and it lands inside the 58.0%–64.3% range measured on the 143-question subset further down, which is exactly the sanity check this run was for.
+> The table right below captures the answer-model comparison as it stood at the correction above; it's still the right read on *answer model choice*, but the retrieval store behind it predates the real fix (see [What was actually wrong ↓](#what-was-actually-wrong-extraction-was-landing-one-fact-per-session)). With that bug fixed and `decay_rate: 0.0` applied (the config found to help in the [retrieval sweep ↓](#retrieval-parameters-swept-against-a-store-that-finally-had-facts-in-it)), a clean full-589-question run (same questions, same answer model `gemini-2.5-flash`) scores **62.1% (366/589)**, up from **47.7% (281/589)** paired on the identical 589 questions: **+14.4 points, +85 questions flipped correct**. It lands inside the 58.0%–64.3% range measured on the 143-question subset further down, which is exactly the sanity check this run was for. **This number is from Mimir's own internal eval scripts, not the AMB project's own leaderboard harness: see the update below for that.**
+
+> ### Update (2026-08-18, later): the actual public-leaderboard harness, run end-to-end
+>
+> Everything above, including the 62.1%, was measured with Mimir's own internal eval scripts against the `personamem/32k` questions, not the AMB project's own `omb` CLI harness that actually produces the public leaderboard. Running that harness end-to-end (same engine, same ingested store, same questions) surfaced a real bug in the adapter: `mimir_provider.py`'s `retrieve()` was rebuilding the answer model's context from bare ranked-fact strings, discarding `context_string`, the actual assembled product (recent-turn context, graph-linked notes, persona summary). A first pass with that bug scored 33.1%; fixed, then re-run: **51.3% (302/589)**. That is the number a real leaderboard submission would show, and it's what the table and comparisons below now use.
+>
+> It is lower than the 62.1% above, and that gap is real, not another bug. Two known differences: AMB's own harness hardcodes `gemini-2.5-flash-lite` for answering with no override available, where the 62.1% run explicitly used `gemini-2.5-flash`; and the harness wraps retrieved context in its own generic "## Memory N" header rather than handing the model Mimir's context raw. Both numbers are honestly measured; they are just not measuring quite the same thing.
 
 | Retrieval | Answer model | Accuracy |
 |---|---|---|
@@ -135,7 +141,7 @@ If you're looking for something production-hardened with a support contract, thi
 ¹ produced by the same failed-only method described above, so it is an upper bound; a clean re-run has not been done.
 ² 150-question stratified sample, not the full split. Projected onto the full question-type mix: **~75%**.
 
-Superseded by the update above: the current headline is **62.1%** (post-extraction-fix, `decay_rate=0.0`). The table's row is the pre-fix retrieval store, kept because it's what the answer-model comparison above was actually measuring.
+Superseded twice over now: **51.3% (302/589)**, from the AMB project's own `omb` harness post-fix, is the real public-leaderboard number. 62.1% is Mimir's own internal-eval-script measurement on the same questions, still accurate but a different methodology. The table's row above is the pre-extraction-fix retrieval store, kept because it's what the answer-model comparison was actually measuring at the time.
 
 ### The answer model does not matter much: that was the error
 
@@ -152,13 +158,13 @@ The three published entries on this split, from the benchmark's own `results-man
 | hindsight | 86.6% | 15,812 |
 | hybrid-search | 84.4% | 24,169 |
 | cognee | 81.8% | 11,848 |
-| **Mimir** | **62.1%** | **~489¹** |
+| **Mimir** | **51.3%** | **219** |
 
-¹ estimated: the full re-run measured 2,406 avg context *characters* per query directly; converted to tokens using the ~4.92 chars/token ratio the harness itself reported for the pre-fix run (875.68 chars → 178 tokens) rather than a generic chars/4 guess. Not independently re-measured in tokens.
+Mimir's row is from the real `omb` leaderboard-harness run, context tokens measured directly (no estimation needed, unlike an earlier pass at this table).
 
-No rank is being claimed from this. Those three ran in a `single-query` response mode that isn't registered in the installed harness (which offers `rag`, `agentic-rag`, and `agent`), and their answer-model configuration hasn't been verified. Treat it as orientation, not a leaderboard position: Mimir is roughly 20 to 25 points behind the top, and that gap is real regardless of how the caveats resolve.
+No rank is being claimed from this. Those three ran in a `single-query` response mode that isn't registered in the installed harness (which offers `rag`, `agentic-rag`, and `agent`), and their answer-model configuration hasn't been verified. Treat it as orientation, not a leaderboard position: Mimir is roughly 30 to 35 points behind the top, and that gap is real regardless of how the caveats resolve.
 
-The context column is still the most interesting thing in that table. Mimir ships an estimated ~489 tokens per query where the leaders ship 11,800 to 24,200: roughly 24x to 49x less material for the answer model to reason over, even after the extraction fix more than tripled how much gets retrieved.
+The context column is still the most interesting thing in that table. Mimir ships 219 measured tokens per query where the leaders ship 11,800 to 24,200: roughly 54x to 110x less material for the answer model to reason over, even after the extraction fix more than tripled how much gets retrieved.
 
 ### The ceiling, and where the remaining gap actually is
 
@@ -259,6 +265,7 @@ Sample-size caveat, stated plainly: n=143 means the 95% interval on any single a
 - **Shipped, the actual lever**: extraction was silently truncated to one fact per session by Gemini thinking tokens eating the output budget. Fixed; 1.5 → 25.1 facts per session, and **+11.9 points** on a paired 143-question re-ingest. Full write-up under [Benchmarks](#what-was-actually-wrong-extraction-was-landing-one-fact-per-session). This is what every earlier retrieval-shaped hypothesis was actually running into.
 - **Shipped**: re-ran the full 589-question split with the fix and `decay_rate: 0.0` in place, replacing the 47.7% headline: **62.1% (366/589)**, up from **47.7% (281/589)** paired on the identical questions (+14.4 points). Lands inside the 58.0%–64.3% range measured on the 143-question subset: the sanity check this run was for.
 - **Shipped**: swept retrieval parameters now that the store actually holds facts. `decay_rate: 0.0` is worth **+6.3 points** (p=0.012) on a multi-session benchmark where every session is equally relevant; no code change needed, it was already config-driven. Widening `max_results` 10 → 20 *costs* **8.4 points** (p=0.012), which retires the wider-window/lower-threshold recommendations this project had been carrying.
+- **Shipped**: ran the AMB project's own `omb` leaderboard harness end-to-end for the first time, rather than relying on internal eval scripts. Found and fixed a real bug in the leaderboard adapter (`mimir_provider.py` was discarding Mimir's assembled context and rebuilding a much poorer one from bare fact strings, capping a first pass at 33.1%). Fixed, then re-run: **51.3% (302/589)**, the real number a leaderboard submission would show. Lower than the internal-harness 62.1% for reasons that are understood (a hardcoded answer model, a plainer context-wrapping format in their harness), not a mystery. Full write-up under [Benchmarks](#benchmarks).
 - **Next**: the remaining ~6 points between 64.3% and the 70.7% perfect-memory ceiling. Given that loosening retrieval hurt, the promising direction is tightening it: better ranking rather than more results.
 - **Next**: `min_priority` (currently 50) and chunked extraction are the two untested extraction-side ideas. Both change what gets stored, so both need a fresh ingest to evaluate.
 - **Next**: `track_full_preference_evolution` was the one category that did *not* improve with 17x more facts (50.0% → 47.5%). Worth understanding before assuming more extraction is uniformly good.
