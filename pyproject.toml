@@ -1,10 +1,10 @@
 [project]
 name = "mimir-engine"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local-first AI agent memory: an Obsidian-compatible markdown brain with hybrid recall, for Claude Code and any MCP client"
 readme = "README.md"
 license = { file = "LICENSE" }
-authors = [{ name = "Anish Naik" }]
+authors = [{ name = "Sahil Tamang" }]
 keywords = ["ai", "memory", "mcp", "agents", "obsidian", "local-first", "rag"]
 classifiers = [
     "Development Status :: 3 - Alpha",
