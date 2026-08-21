@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mimir: local-first AI agent memory</title>
+<meta name="description" content="Your AI agent's memory is a folder of markdown files. Local-first, MCP-native, no server required.">
+<meta property="og:title" content="Mimir: local-first AI agent memory">
+<meta property="og:description" content="Your AI agent's memory is a folder of markdown files. Local-first, MCP-native, no server required.">
+<meta property="og:image" content="https://mimir-vert.vercel.app/assets/social-preview.png">
+<meta property="og:url" content="https://mimir-vert.vercel.app">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mimir: local-first AI agent memory">
+<meta name="twitter:description" content="Your AI agent's memory is a folder of markdown files. Local-first, MCP-native, no server required.">
+<meta name="twitter:image" content="https://mimir-vert.vercel.app/assets/social-preview.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
+<style>
+  :root{
+    --bg:#0b0d10;
+    --bg2:#12151a;
+    --panel:#161a20;
+    --border:#262b33;
+    --text:#e7e9ec;
+    --muted:#9aa3af;
+    --accent:#8b7cf6;
+    --accent2:#5ecbb0;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 50% -10%, #1a1330 0%, var(--bg) 55%);
+    color:var(--text);
+    font-family:var(--sans);
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px}
+  header.hero{padding:96px 0 64px;text-align:center}
+  .badge{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:13px;color:var(--muted);
+    border:1px solid var(--border);border-radius:999px;
+    padding:6px 14px;margin-bottom:28px;
+    background:rgba(255,255,255,0.02);
+  }
+  .badge .dot{width:6px;height:6px;border-radius:50%;background:var(--accent2)}
+  h1{
+    font-size:clamp(40px,7vw,64px);
+    margin:0 0 18px;
+    font-weight:700;
+    letter-spacing:-0.02em;
+    background:linear-gradient(135deg,#fff 30%,#c9c2ff 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .tagline{
+    font-size:clamp(17px,2.4vw,21px);
+    color:var(--muted);
+    max-width:640px;
+    margin:0 auto 36px;
+  }
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:12px 22px;border-radius:10px;font-size:15px;font-weight:600;
+    border:1px solid var(--border);
+  }
+  .btn.primary{background:var(--accent);color:#0b0d10;border-color:var(--accent)}
+  .btn.primary:hover{background:#a498ff;text-decoration:none}
+  .btn.ghost{color:var(--text);background:rgba(255,255,255,0.03)}
+  .btn.ghost:hover{background:rgba(255,255,255,0.07);text-decoration:none}
+
+  .video-frame{
+    max-width:900px;margin:0 auto 90px;
+    border:1px solid var(--border);border-radius:14px;overflow:hidden;
+    box-shadow:0 40px 100px -30px rgba(139,124,246,0.25);
+  }
+  .video-frame video{display:block;width:100%;height:auto}
+
+  section{padding:64px 0;border-top:1px solid var(--border)}
+  .kicker{
+    font-family:var(--mono);font-size:13px;color:var(--accent2);
+    text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;
+  }
+  h2{font-size:clamp(24px,3.5vw,32px);margin:0 0 14px;letter-spacing:-0.01em}
+  .lede{color:var(--muted);max-width:640px;font-size:16px;margin-bottom:40px}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  @media (max-width:760px){.grid3{grid-template-columns:1fr}}
+  .card{
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:24px;
+  }
+  .card h3{margin:0 0 8px;font-size:16px}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+
+  .stat-row{display:flex;gap:24px;flex-wrap:wrap;align-items:stretch}
+  .stat{
+    flex:1;min-width:220px;
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:28px;text-align:center;
+  }
+  .stat .num{
+    font-family:var(--mono);font-size:44px;font-weight:700;color:var(--accent2);
+    display:block;margin-bottom:6px;
+  }
+  .stat .label{color:var(--muted);font-size:14px}
+  .fine{color:var(--muted);font-size:14px;margin-top:22px;max-width:680px}
+  .fine code{font-family:var(--mono);background:var(--bg2);padding:2px 6px;border-radius:4px;font-size:13px}
+
+  .quickstart{
+    background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+    padding:22px 24px;font-family:var(--mono);font-size:14px;color:var(--text);
+    overflow-x:auto;
+  }
+  .quickstart .comment{color:var(--muted)}
+  .quickstart + .quickstart{margin-top:16px}
+  h3.substep{font-size:15px;margin:36px 0 12px;color:var(--text)}
+  h3.substep:first-of-type{margin-top:0}
+
+  .api-table{width:100%;border-collapse:collapse;font-size:14px}
+  .api-table td{padding:11px 4px;border-top:1px solid var(--border);vertical-align:top}
+  .api-table tr:first-child td{border-top:none}
+  .api-table td:first-child{font-family:var(--mono);color:var(--accent2);white-space:nowrap;padding-right:24px}
+  .api-table td:last-child{color:var(--muted)}
+
+  footer{padding:48px 0 80px;text-align:center;color:var(--muted);font-size:14px}
+  footer .links{display:flex;gap:20px;justify-content:center;margin-bottom:18px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="badge"><span class="dot"></span>local-first, open source, MIT licensed</div>
+    <h1>Your agent's memory is<br>a folder of markdown files.</h1>
+    <p class="tagline">Open it in Obsidian. Edit a fact by hand. The agent sees your edit on its next thought, because there's nothing to sync.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/hasil7677/mimir">View on GitHub</a>
+      <a class="btn ghost" href="https://github.com/hasil7677/mimir#quickstart">Quickstart</a>
+    </div>
+  </header>
+
+  <div class="video-frame">
+    <video autoplay loop muted playsinline>
+      <source src="assets/vault-demo.mp4" type="video/mp4">
+    </video>
+  </div>
+
+  <section id="why">
+    <div class="kicker">why a vault, not a database</div>
+    <h2>The databases are indexes. The vault is the truth.</h2>
+    <p class="lede">Every other memory system stores an agent's knowledge as opaque rows you'd need a script to inspect. Mimir writes it as real markdown, with YAML frontmatter and wikilinks between facts and the entities they mention.</p>
+    <div class="grid3">
+      <div class="card">
+        <h3>You can open it</h3>
+        <p>The vault is a real Obsidian vault. Graph view, backlinks, full-text search, all free, all native.</p>
+      </div>
+      <div class="card">
+        <h3>You can fix it</h3>
+        <p>Agent got something wrong? Edit the note. The fix takes effect on the next read. No re-ingestion, no cache invalidation.</p>
+      </div>
+      <div class="card">
+        <h3>It's yours</h3>
+        <p>Copy the folder to a new machine and your agent remembers everything, everywhere. Git init it if you want history.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="benchmark">
+    <div class="kicker">agent memory benchmark</div>
+    <h2>Real numbers, not a cherry-picked sample.</h2>
+    <div class="stat-row">
+      <div class="stat">
+        <span class="num">51.3%</span>
+        <span class="label">personamem/32k, official AMB leaderboard harness</span>
+      </div>
+      <div class="stat">
+        <span class="num">302/589</span>
+        <span class="label">answered correctly, no judge involved</span>
+      </div>
+    </div>
+    <p class="fine">This is the number the AMB project's own <code>omb</code> harness produces end to end, not an internal eval script; it's what a real leaderboard submission would show. Full methodology, including an earlier retracted 59.6% and a second internal-only 62.1% figure that measures a different thing, is in the <a href="https://github.com/hasil7677/mimir#benchmarks">README's Benchmarks section</a>.</p>
+  </section>
+
+  <section id="quickstart">
+    <div class="kicker">setup</div>
+    <h2>No server, no Docker, no API key.</h2>
+
+    <h3 class="substep">Install and run</h3>
+    <div class="quickstart">
+<span class="comment"># that's the whole install</span>
+pip install mimir-engine
+mimir serve --port 8080
+    </div>
+    <p class="fine"><code>GET /health</code> works with zero config: no <code>mimir.yaml</code>, no Redis, no API key required. Grab <code>mimir.yaml.example</code> from the repo when you want to point at a local Ollama model, a cloud LLM, or a Redis instance; every setting has a sane default until then.</p>
+
+    <h3 class="substep">Use it from Claude Code (or any MCP client)</h3>
+    <div class="quickstart">
+claude mcp add mimir --scope user -e MIMIR_USER_ID=you -- mimir mcp
+    </div>
+    <p class="fine">No gateway to run: the embedded adapter imports the engine directly, so a process only exists while your agent session is open. Three tools show up: <code>mimir_recall</code>, <code>mimir_remember</code>, <code>mimir_flush</code>. Running more than one agent session at once? Start <code>mimir serve</code> and point every client at <code>mimir mcp --gateway</code> instead: same tools, same files, no lock contention. OpenCode, Pi, and a plain HTTP contract for anything else are documented in <a href="https://github.com/hasil7677/mimir/blob/main/docs/CLIENTS.md">docs/CLIENTS.md</a>.</p>
+
+    <h3 class="substep">Working on the engine itself</h3>
+    <div class="quickstart">
+git clone https://github.com/hasil7677/mimir.git
+cd mimir/engine
+pip install -e ".[dev]"
+uvicorn app.main:app --port 8080
+    </div>
+    <p class="fine">Same server, but picks up local edits. Talks to Claude Code or any MCP client out of the box. Add a local or cloud LLM later and every layer gets sharper automatically: nothing you built against ever has to change.</p>
+  </section>
+
+  <section id="api">
+    <div class="kicker">http api</div>
+    <h2>Every MCP tool is also a plain HTTP endpoint.</h2>
+    <p class="lede">No gateway process required for MCP, but if you're building outside Claude Code (a web app, another agent framework, a cron job), the same engine is reachable over HTTP once <code>mimir serve</code> is running.</p>
+    <table class="api-table">
+      <tr><td>POST /capture</td><td>Append a turn to the current session (best-effort Redis push, durable write to DuckDB).</td></tr>
+      <tr><td>POST /session/end</td><td>Flush the session: extract atomic facts, dedupe against what's known, write the vault scene note.</td></tr>
+      <tr><td>POST /recall</td><td>Hybrid search (BM25 + vector) with the four-signal score, returns a ready-to-inject context string.</td></tr>
+      <tr><td>GET /vault/notes</td><td>List every markdown note in the vault.</td></tr>
+      <tr><td>GET /vault/note/{target}</td><td>Read one note by slug or wikilink target.</td></tr>
+      <tr><td>GET /export/{user_id}</td><td>Full export: every fact, scene, and vault file for a user, GDPR-style.</td></tr>
+      <tr><td>DELETE /user/{user_id}</td><td>Full erasure across every store: DuckDB, vault, Qdrant, Redis.</td></tr>
+      <tr><td>GET /health</td><td>Liveness check, works with zero config.</td></tr>
+    </table>
+    <p class="fine">Full request/response shapes and the MCP tool contract: <a href="https://github.com/hasil7677/mimir/blob/main/docs/CLIENTS.md">docs/CLIENTS.md</a>. Module-by-module walkthrough of what happens behind each call: <a href="https://github.com/hasil7677/mimir/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a>.</p>
+  </section>
+
+  <footer>
+    <div class="links">
+      <a href="https://github.com/hasil7677/mimir">GitHub</a>
+      <a href="https://github.com/hasil7677/mimir/blob/main/docs/ARCHITECTURE.md">Architecture</a>
+      <a href="https://github.com/hasil7677/mimir/blob/main/LICENSE">MIT License</a>
+      <a href="https://agentmemorybenchmark.ai">Agent Memory Benchmark</a>
+    </div>
+    Mimir. Local-first AI agent memory.
+  </footer>
+</div>
+
+</body>
+</html>
