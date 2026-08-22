@@ -65,6 +65,31 @@ def get_connection() -> duckdb.DuckDBPyConnection:
     return _conn
 
 
+def _reset_connection() -> None:
+    """Discards the shared connection so the next call reconnects fresh.
+    Without this, one DuckDB exception (e.g. an OOM mid-query) leaves the
+    shared connection object poisoned, and every later call keeps failing
+    for the rest of the process's life — observed live during a PersonaMem
+    eval run, where a single OOM cascaded into total DB unavailability."""
+    global _conn
+    if _conn is not None:
+        try:
+            _conn.close()
+        except Exception:
+            pass
+    _conn = None
+
+
+def execute(sql: str, params: list | None = None):
+    """Runs a statement against the shared connection, recovering from a
+    poisoned connection by reconnecting once and retrying."""
+    try:
+        return get_connection().execute(sql, params or [])
+    except duckdb.Error:
+        _reset_connection()
+        return get_connection().execute(sql, params or [])
+
+
 def ensure_schema() -> None:
     """Idempotent — safe to call on every startup."""
     get_connection()
@@ -80,7 +105,7 @@ def insert_l0_message(
     turn_index: int,
     recorded_at,
 ) -> None:
-    get_connection().execute(
+    execute(
         """
         INSERT INTO l0_conversations
             (id, user_id, tenant_id, session_id, role, content, turn_index, recorded_at)
@@ -91,7 +116,7 @@ def insert_l0_message(
 
 
 def get_l0_messages(user_id: str, tenant_id: str, session_id: str) -> list[dict]:
-    rows = get_connection().execute(
+    rows = execute(
         """
         SELECT id, role, content, turn_index, recorded_at FROM l0_conversations
         WHERE user_id = ? AND tenant_id = ? AND session_id = ?
@@ -106,7 +131,7 @@ def get_l0_messages(user_id: str, tenant_id: str, session_id: str) -> list[dict]
 def get_all_session_ids(user_id: str, tenant_id: str) -> list[str]:
     """Every session_id that has captured turns, oldest first — used to find
     sessions an adapter process captured but never flushed."""
-    rows = get_connection().execute(
+    rows = execute(
         "SELECT DISTINCT session_id, min(recorded_at) AS first_turn FROM l0_conversations "
         "WHERE user_id = ? AND tenant_id = ? GROUP BY session_id ORDER BY first_turn",
         [user_id, tenant_id],
@@ -115,7 +140,7 @@ def get_all_session_ids(user_id: str, tenant_id: str) -> list[str]:
 
 
 def get_all_l0(user_id: str, tenant_id: str) -> list[dict]:
-    rows = get_connection().execute(
+    rows = execute(
         "SELECT id, session_id, role, content, turn_index, recorded_at FROM l0_conversations "
         "WHERE user_id = ? AND tenant_id = ? ORDER BY recorded_at, turn_index",
         [user_id, tenant_id],
@@ -125,7 +150,7 @@ def get_all_l0(user_id: str, tenant_id: str) -> list[dict]:
 
 
 def get_all_l1(user_id: str, tenant_id: str) -> list[dict]:
-    rows = get_connection().execute(
+    rows = execute(
         "SELECT id, content, type, priority, scene_name, session_id, created_at, "
         "access_count, is_active, superseded_by FROM l1_memories "
         "WHERE user_id = ? AND tenant_id = ? ORDER BY created_at",
@@ -141,13 +166,12 @@ def erase_user(user_id: str, tenant_id: str) -> dict:
     erased — it holds ids and actions, not content, and the erasure itself
     must remain provable. Contradiction rows referencing the user's facts go
     first (they'd dangle otherwise)."""
-    conn = get_connection()
-    fact_ids = [r[0] for r in conn.execute(
+    fact_ids = [r[0] for r in execute(
         "SELECT id FROM l1_memories WHERE user_id = ? AND tenant_id = ?", [user_id, tenant_id]
     ).fetchall()]
     if fact_ids:
         placeholders = ", ".join("?" for _ in fact_ids)
-        conn.execute(
+        execute(
             f"DELETE FROM l1_contradictions WHERE memory_id_a IN ({placeholders}) "
             f"OR memory_id_b IN ({placeholders})",
             [*fact_ids, *fact_ids],
@@ -155,10 +179,10 @@ def erase_user(user_id: str, tenant_id: str) -> dict:
     # execute() returns the connection itself, so each DELETE's count must be
     # fetched before the next statement runs — deferring the fetch reads the
     # wrong statement's count (found the hard way).
-    l0_deleted = _rowcount(conn.execute(
+    l0_deleted = _rowcount(execute(
         "DELETE FROM l0_conversations WHERE user_id = ? AND tenant_id = ?", [user_id, tenant_id]
     ))
-    l1_deleted = _rowcount(conn.execute(
+    l1_deleted = _rowcount(execute(
         "DELETE FROM l1_memories WHERE user_id = ? AND tenant_id = ?", [user_id, tenant_id]
     ))
     return {"l0_deleted": l0_deleted, "l1_deleted": l1_deleted, "fact_ids": len(fact_ids)}
@@ -183,7 +207,7 @@ def log_audit(
 ) -> None:
     import json
 
-    get_connection().execute(
+    execute(
         """
         INSERT INTO audit_log (id, user_id, tenant_id, action, target_ids, performed_at, metadata)
         VALUES (?, ?, ?, ?, ?, ?, ?)

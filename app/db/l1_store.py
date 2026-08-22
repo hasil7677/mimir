@@ -12,7 +12,7 @@ import json
 import logging
 import re
 
-from app.db.duckdb_client import get_connection, to_utc_naive
+from app.db.duckdb_client import execute, to_utc_naive
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def insert_fact(
     source_ids: list[str],
     created_at,
 ) -> None:
-    get_connection().execute(
+    execute(
         """
         INSERT INTO l1_memories
             (id, user_id, tenant_id, content, type, priority, scene_name, session_id,
@@ -61,10 +61,9 @@ def insert_fact(
 
 
 def _fts_ready() -> bool:
-    conn = get_connection()
     if _fts_state["available"] is None:
         try:
-            conn.execute("INSTALL fts; LOAD fts;")
+            execute("INSTALL fts; LOAD fts;")
             _fts_state["available"] = True
         except Exception:
             # ERROR, not WARNING: this silently swaps real BM25 ranking for a
@@ -80,7 +79,7 @@ def _fts_ready() -> bool:
             )
             _fts_state["available"] = False
     if _fts_state["available"] and _fts_state["dirty"]:
-        conn.execute("PRAGMA create_fts_index('l1_memories', 'id', 'content', overwrite=1)")
+        execute("PRAGMA create_fts_index('l1_memories', 'id', 'content', overwrite=1)")
         _fts_state["dirty"] = False
     return bool(_fts_state["available"])
 
@@ -92,9 +91,8 @@ def search_keyword(tenant_id: str, user_id: str, query: str, top_k: int = 20) ->
     """Active facts for this tenant/user ranked by keyword relevance.
     Score scale differs between BM25 and the fallback — callers must treat it
     as a ranking signal only, which is all RRF needs."""
-    conn = get_connection()
     if _fts_ready():
-        rows = conn.execute(
+        rows = execute(
             """
             SELECT id, content, type, priority, scene_name, created_at, access_count,
                    fts_main_l1_memories.match_bm25(id, ?) AS score
@@ -112,7 +110,7 @@ def search_keyword(tenant_id: str, user_id: str, query: str, top_k: int = 20) ->
     if not terms:
         return []
     match_expr = " + ".join("CAST(contains(lower(content), ?) AS INTEGER)" for _ in terms)
-    rows = conn.execute(
+    rows = execute(
         f"""
         SELECT id, content, type, priority, scene_name, created_at, access_count,
                ({match_expr}) AS score
@@ -130,7 +128,7 @@ def get_facts_by_ids(tenant_id: str, user_id: str, fact_ids: list[str]) -> list[
     if not fact_ids:
         return []
     placeholders = ", ".join("?" for _ in fact_ids)
-    rows = get_connection().execute(
+    rows = execute(
         f"""
         SELECT id, content, type, priority, scene_name, created_at, access_count, 0.0 AS score
         FROM l1_memories
@@ -144,7 +142,7 @@ def get_facts_by_ids(tenant_id: str, user_id: str, fact_ids: list[str]) -> list[
 def supersede(old_id: str, new_id: str) -> None:
     """Marks the old fact replaced — never deleted. Same stance as everywhere:
     is_active=false keeps it out of search, superseded_by keeps the lineage."""
-    get_connection().execute(
+    execute(
         "UPDATE l1_memories SET is_active = FALSE, superseded_by = ?, updated_at = now() WHERE id = ?",
         [new_id, old_id],
     )
@@ -154,14 +152,14 @@ def supersede(old_id: str, new_id: str) -> None:
 def record_contradiction(contradiction_id: str, memory_id_a: str, memory_id_b: str, detected_at) -> None:
     """Flag-and-log, never auto-resolve — surfacing a conflict for review beats
     silently deciding which of the user's own statements to believe."""
-    get_connection().execute(
+    execute(
         "INSERT INTO l1_contradictions (id, memory_id_a, memory_id_b, detected_at) VALUES (?, ?, ?, ?)",
         [contradiction_id, memory_id_a, memory_id_b, to_utc_naive(detected_at)],
     )
 
 
 def count_active_facts(tenant_id: str, user_id: str) -> int:
-    row = get_connection().execute(
+    row = execute(
         "SELECT count(*) FROM l1_memories WHERE tenant_id = ? AND user_id = ? AND is_active",
         [tenant_id, user_id],
     ).fetchone()
@@ -176,7 +174,7 @@ def get_top_facts(tenant_id: str, user_id: str, limit: int = 30, types: list[str
         type_clause = f"AND type IN ({', '.join('?' for _ in types)})"
         params.extend(types)
     params.append(limit)
-    rows = get_connection().execute(
+    rows = execute(
         f"""
         SELECT id, content, type, priority, scene_name, created_at, access_count, 0.0 AS score
         FROM l1_memories
@@ -203,7 +201,6 @@ def get_predecessor_chains(tenant_id: str, user_id: str, fact_ids: list[str]) ->
     """
     if not fact_ids:
         return {}
-    conn = get_connection()
     chains: dict[str, list[dict]] = {fid: [] for fid in fact_ids}
     frontier = [(fid, fid) for fid in fact_ids]
     seen_ids = set(fact_ids)
@@ -213,7 +210,7 @@ def get_predecessor_chains(tenant_id: str, user_id: str, fact_ids: list[str]) ->
             break
         current_ids = list({cid for _, cid in frontier})
         placeholders = ", ".join("?" for _ in current_ids)
-        rows = conn.execute(
+        rows = execute(
             f"""
             SELECT id, content, type, superseded_by
             FROM l1_memories
@@ -243,7 +240,7 @@ def bump_access(fact_ids: list[str]) -> None:
     if not fact_ids:
         return
     placeholders = ", ".join("?" for _ in fact_ids)
-    get_connection().execute(
+    execute(
         f"UPDATE l1_memories SET access_count = access_count + 1, last_accessed = now() "
         f"WHERE id IN ({placeholders})",
         fact_ids,

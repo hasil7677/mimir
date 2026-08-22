@@ -15,7 +15,7 @@ Open it in Obsidian. Edit a fact by hand. The agent sees your edit on its next t
 </div>
 
 <p align="center">
-  <img src="docs/images/vault-demo.gif" alt="The Obsidian vault graph view, grown from a real conversation" width="640">
+  <img src="https://raw.githubusercontent.com/hasil7677/mimir/main/docs/images/vault-demo.gif" alt="The Obsidian vault graph view, grown from a real conversation" width="640">
 </p>
 
 ---
@@ -96,7 +96,7 @@ Also documented: OpenCode (native MCP), Pi (via the community `pi-mcp-adapter`),
 
 This is early: built fast, tested hard, not yet battle-tested by anyone but me. Here's the honest split:
 
-**Solid and tested (113 tests, 109 pass with zero services/extras installed, 4 skip: 3 need a live Redis, 1 needs the optional `fastembed` extra, real HTTP layer, real filesystem, real dedup logic):**
+**Solid and tested (133 tests, 129 pass with zero services/extras installed, 4 skip: 3 need a live Redis, 1 needs the optional `fastembed` extra, real HTTP layer, real filesystem, real dedup logic):**
 hybrid recall with a 4-signal scoring formula · semantic caching with measured cache hits · L1.5 fact consolidation (exact-dup detection needs zero LLM calls; an LLM present gets you store/skip/supersede/contradiction-flag decisions, with hallucinated target IDs rejected) · GDPR-style erasure and export across every store · a self-healing recovery path for orphaned sessions (found live, fixed same day; see the commit log if you want to watch that happen) · MCP support verified end-to-end inside real Claude Code sessions.
 
 **Known gaps, not hidden:**
