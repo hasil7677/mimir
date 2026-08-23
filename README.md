@@ -210,8 +210,8 @@ The cause was a truncation bug. `_chat_vertex` sent `maxOutputTokens` with no `t
 | | finishReason | thinking tokens | usable output | facts extracted |
 |---|---|---|---|---|
 | Before | `MAX_TOKENS` | 1,918 | 78 tokens | **1** |
-| Thinking off | `MAX_TOKENS` | — | 2,000 tokens | 32 |
-| Thinking off, 8k budget | `STOP` | — | 2,695 tokens | **44** |
+| Thinking off | `MAX_TOKENS` | - | 2,000 tokens | 32 |
+| Thinking off, 8k budget | `STOP` | - | 2,695 tokens | **44** |
 
 1,918 of a 2,000-token budget went to thinking. The 78 tokens left held one complete JSON fact object and the start of a second, and the resilient parser correctly kept the one object it could parse. This returned HTTP 200 every time, with `finishReason: MAX_TOKENS` in a response field the engine never read.
 
@@ -221,7 +221,7 @@ Re-ingesting 30 sessions across 6 personas and re-answering their 143 questions 
 
 | | Accuracy | Facts per session |
 |---|---|---|
-| No memory at all | 45.5% | — |
+| No memory at all | 45.5% | - |
 | Before the fix | 46.2% | 1.5 |
 | After the fix | **58.0%** | **25.1** |
 
@@ -235,7 +235,7 @@ With extraction fixed, retrieval tuning became worth measuring: every query was 
 
 | Config | Accuracy | vs baseline | p |
 |---|---|---|---|
-| `max_results 10`, `threshold 0.30`, `decay 0.05` (baseline) | 58.0% | — | — |
+| `max_results 10`, `threshold 0.30`, `decay 0.05` (baseline) | 58.0% | - | - |
 | **`decay_rate 0.0`** | **64.3%** | **+6.3** | **0.012** |
 | `decay_rate 0`, `max_results 20` | 55.9% | −2.1 | 0.648 |
 | `decay_rate 0`, `max_results 20`, `threshold 0.15`, `12k chars` | 59.4% | +1.4 | 0.804 |
