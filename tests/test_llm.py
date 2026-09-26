@@ -245,3 +245,44 @@ def test_complete_response_does_not_warn(monkeypatch, caplog):
             assert chat("hello") == "all done"
 
     assert "truncated" not in caplog.text
+
+
+# ── last_error: why a caller degraded ─────────────────────────────────────
+# extract_facts swallows LlmUnavailable and falls back to verbatim, which
+# is right for availability and left "why" unanswerable. mimir_flush reads
+# llm.last_error to say why.
+
+
+def test_a_failure_is_recorded_and_the_next_success_clears_it():
+    from app.core import llm
+
+    with patch("app.core.llm.httpx.post", return_value=_response(401)), \
+         patch("app.core.llm.time.sleep"):
+        with pytest.raises(LlmUnavailable):
+            chat("hello")
+    assert llm.last_error
+
+    with patch("app.core.llm.httpx.post", return_value=_response(200, "ok")):
+        assert chat("hello") == "ok"
+    assert llm.last_error is None
+
+
+def test_the_flush_warning_names_the_config_and_the_error(monkeypatch):
+    """mimir_flush's degraded-mode message is the whole user-facing fix: it
+    must say which config was read and what the LLM said."""
+    import sys
+    from pathlib import Path
+
+    pytest.importorskip("mcp.server.mcpserver")
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "adapters"))
+    import mcp_embedded
+    from app import config as config_module
+    from app.core import llm
+
+    monkeypatch.setattr(config_module, "config_source", None)
+    monkeypatch.setattr(llm, "last_error", "Client error '401 Unauthorized'")
+    text = mcp_embedded._degraded_warning()
+    assert "verbatim" in text
+    assert "none found" in text
+    assert "401 Unauthorized" in text
+    assert "~/.mimir/mimir.yaml" in text

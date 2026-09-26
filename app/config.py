@@ -213,14 +213,46 @@ def _apply_env_overrides(config: MimirConfig) -> MimirConfig:
     return config
 
 
+# Where the loaded config came from, or None if every setting is a default.
+# Surfaced by mimir_flush when extraction degrades, because "which file did it
+# read" is the first question and was previously unanswerable.
+config_source: str | None = None
+
+
+def _resolve_config_path(path: str | None) -> Path:
+    """Explicit path > MIMIR_CONFIG > ./mimir.yaml > ~/.mimir/mimir.yaml.
+
+    The home-directory fallback exists because the MCP server is launched by
+    Claude Code with its cwd set to whatever project the user has open. A
+    ./mimir.yaml lookup alone meant the server found a config only when you
+    happened to be working inside the mimir repo - everywhere else it booted
+    on defaults (OpenAI, no key), every LLM call 401'd, and mimir_flush
+    silently degraded to verbatim extraction with no persona synthesis.
+    ~/.mimir is where the database and vault already live, so it is where a
+    user would look for the config too.
+    """
+    if path:
+        return Path(path)
+    env_path = os.environ.get("MIMIR_CONFIG")
+    if env_path:
+        return Path(env_path)
+    for candidate in (Path("mimir.yaml"), Path.home() / ".mimir" / "mimir.yaml"):
+        if candidate.exists():
+            return candidate
+    return Path("mimir.yaml")
+
+
 def load_config(path: str | None = None) -> MimirConfig:
     """Local-first by design: if no config file is found, every setting falls
     back to its documented default and the gateway still boots — a config
     file is an override, never a requirement.
     """
-    config_path = Path(path or os.environ.get("MIMIR_CONFIG", "mimir.yaml"))
+    global config_source
+    config_path = _resolve_config_path(path)
     if not config_path.exists():
+        config_source = None
         return _apply_env_overrides(MimirConfig())
+    config_source = str(config_path.resolve())
 
     raw = config_path.read_text()
     substituted = _substitute_env_vars(raw)

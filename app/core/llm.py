@@ -176,7 +176,22 @@ def _extract_openai_text(body: dict, max_tokens: int) -> str:
     return text
 
 
+# The most recent LlmUnavailable message, cleared on the next success. Callers
+# like extract_facts deliberately swallow LlmUnavailable and degrade, which is
+# right for availability and wrong for diagnosis: without this, "why did flush
+# fall back to verbatim" had no answer short of reading DEBUG logs.
+last_error: str | None = None
+
+
 def chat(prompt: str, max_tokens: int = 512) -> str:
-    if settings.llm.provider == "vertex":
-        return _chat_vertex(prompt, max_tokens)
-    return _chat_openai_compatible(prompt, max_tokens)
+    global last_error
+    try:
+        if settings.llm.provider == "vertex":
+            text = _chat_vertex(prompt, max_tokens)
+        else:
+            text = _chat_openai_compatible(prompt, max_tokens)
+    except LlmUnavailable as exc:
+        last_error = str(exc)
+        raise
+    last_error = None
+    return text

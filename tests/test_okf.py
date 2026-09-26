@@ -82,6 +82,45 @@ def test_wikify_does_not_link_entity_absent_from_text():
     assert linked == ["Sarah"]
 
 
+def test_wikify_survives_an_entity_containing_a_backslash():
+    # Regression, 2026-09-25. re.sub with a *string* replacement parses it as
+    # a template, so a Windows path in the entity list raised
+    # "bad escape \\U" and took the whole flush down with it. Every other
+    # fixture in this file is a clean human name, which is why it survived
+    # until a real coding session got flushed.
+    path = "C:\\Users\\Sahil\\projects"
+    text = f"Sahil worked in {path} today."
+    result, linked = okf.wikify(text, [path])
+    assert linked == [path]
+    assert path in result, "the backslashes must survive into the note"
+    assert result == f"Sahil worked in [[c-users-sahil-projects|{path}]] today."
+
+
+def test_wikify_does_not_expand_a_backreference_in_an_entity_name():
+    # Same defect, different symptom: the template parser read "\\1" as a
+    # group reference. This one raised rather than corrupting, only because
+    # the pattern happens to have no capturing groups.
+    entity = "Item \\1"
+    text = f"The {entity} shipped."
+    result, linked = okf.wikify(text, [entity])
+    assert linked == [entity]
+    assert result == f"The [[item-1|{entity}]] shipped."
+
+
+def test_wikify_does_not_silently_mangle_a_path_with_an_escape_lookalike():
+    # The dangerous half of the defect, and the most likely one in practice.
+    # "\\t" and "\\n" ARE valid escapes, so these never raised — the template
+    # parser quietly turned them into a real tab and a real newline and wrote
+    # the mangled text into the vault note. A crash at least tells you.
+    entity = "C:\\temp\\new"
+    text = f"Sahil used {entity} today."
+    result, linked = okf.wikify(text, [entity])
+    assert linked == [entity]
+    assert "\t" not in result, "a literal backslash-t must not become a tab"
+    assert "\n" not in result, "a literal backslash-n must not become a newline"
+    assert result == f"Sahil used [[c-temp-new|{entity}]] today."
+
+
 def test_slugify():
     assert okf.slugify("Project X: The Reckoning!") == "project-x-the-reckoning"
     assert okf.slugify("Café däy") == "cafe-day"

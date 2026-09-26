@@ -105,7 +105,30 @@ def mimir_flush() -> str:
             f"- {session_id}{marker}: scene={result['note']} facts={result['facts_extracted']} "
             f"(extraction={result['extraction']}, persona={result['persona']})"
         )
+    if any(r.get("extraction") == "verbatim" for r in summary["results"].values()):
+        lines.append(_degraded_warning())
     return "\n".join(lines)
+
+
+def _degraded_warning() -> str:
+    """Why extraction fell back, and what fixes it. `verbatim` means the turns
+    were stored as-is with no fact extraction - recall still works, but on
+    raw text rather than distilled facts, and the persona is only ever a
+    digest. A degradation, not a failure, which is exactly why it went
+    unnoticed for weeks: say so every time it happens."""
+    from app import config as config_module
+    from app.config import settings
+    from app.core import llm
+
+    source = config_module.config_source or "none found (defaults in use)"
+    reason = llm.last_error or "unknown"
+    return (
+        "WARNING: the LLM was unavailable, so facts were stored verbatim instead of "
+        f"extracted. llm={settings.llm.provider}/{settings.llm.model}, config={source}, "
+        f"last error: {reason[:200]}. Fix: put an `llm:` section with a working key in "
+        "~/.mimir/mimir.yaml (see mimir.yaml.example) or point MIMIR_CONFIG at one, then "
+        "restart the MCP server. Already-stored turns are not re-extracted."
+    )
 
 
 if __name__ == "__main__":

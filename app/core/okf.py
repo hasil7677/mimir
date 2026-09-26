@@ -99,7 +99,13 @@ def wikify(text: str, entities: list[str]) -> tuple[str, list[str]]:
         # wouldn't cover — spaces, punctuation, accents.
         slug = slugify(entity)
         replacement = f"[[{entity}]]" if slug == entity.lower() else f"[[{slug}|{entity}]]"
-        text = pattern.sub(replacement, text, count=1)
+        # A callable replacement, not a string one. re.sub treats a string
+        # replacement as a *template* and parses backslashes in it, so an
+        # entity holding a Windows path raised "bad escape" and killed the
+        # whole flush — and, worse, an entity holding a backreference expanded
+        # to a capture group silently and corrupted the note. A callable is
+        # inserted verbatim and never parsed.
+        text = pattern.sub(lambda _match: replacement, text, count=1)
     return text, linked
 
 

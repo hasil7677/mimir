@@ -6,6 +6,9 @@ values a yaml file already mentions, so sweeping one parameter across runs
 otherwise meant writing a config file per run.
 """
 
+from pathlib import Path
+
+from app import config as config_module
 from app.config import load_config
 
 
@@ -86,3 +89,56 @@ def test_yaml_env_substitution_still_works(tmp_path, monkeypatch):
     config_file.write_text('llm:\n  api_key: "${SOME_SECRET}"\n', encoding="utf-8")
 
     assert load_config(str(config_file)).llm.api_key == "sk-from-env"
+
+
+# ── where the config is found ───────────────────────────────────────────────
+# Regression for mimir_flush degrading silently: the MCP server runs with its
+# cwd set to whatever project Claude Code has open, so a ./mimir.yaml-only
+# lookup found no config almost everywhere, booted on defaults (OpenAI, no
+# key), and every flush fell back to verbatim extraction.
+
+
+def _home_config(tmp_path, monkeypatch, model="from-home"):
+    home = tmp_path / "home"
+    (home / ".mimir").mkdir(parents=True)
+    (home / ".mimir" / "mimir.yaml").write_text(f"llm:\n  model: {model}\n")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("MIMIR_CONFIG", raising=False)
+    return home
+
+
+def test_falls_back_to_the_home_config_when_cwd_has_none(tmp_path, monkeypatch):
+    _home_config(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "some-other-project"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert load_config().llm.model == "from-home"
+    assert config_module.config_source.endswith("mimir.yaml")
+
+
+def test_cwd_config_still_wins_over_home(tmp_path, monkeypatch):
+    _home_config(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "mimir.yaml").write_text("llm:\n  model: from-cwd\n")
+    monkeypatch.chdir(project)
+    assert load_config().llm.model == "from-cwd"
+
+
+def test_mimir_config_env_wins_over_both(tmp_path, monkeypatch):
+    _home_config(tmp_path, monkeypatch)
+    explicit = tmp_path / "explicit.yaml"
+    explicit.write_text("llm:\n  model: from-env\n")
+    monkeypatch.setenv("MIMIR_CONFIG", str(explicit))
+    monkeypatch.chdir(tmp_path)
+    assert load_config().llm.model == "from-env"
+
+
+def test_no_config_anywhere_reports_defaults(tmp_path, monkeypatch):
+    home = tmp_path / "empty-home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("MIMIR_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    load_config()
+    assert config_module.config_source is None

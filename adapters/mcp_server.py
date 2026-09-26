@@ -61,10 +61,19 @@ def mimir_flush() -> str:
     """Flush this session into long-term memory: writes the vault scene note,
     extracts facts, refreshes the persona. Call at natural conversation ends."""
     result = _post("/session/end", {"user_id": MIMIR_USER_ID, "session_id": _SESSION_ID})
-    return (
+    text = (
         f"flushed: scene={result['note']} facts={result['facts_extracted']} "
         f"(extraction={result['extraction']}, persona={result['persona']})"
     )
+    if result.get("extraction") == "verbatim":
+        # The gateway, not this process, holds the LLM config - so name
+        # where to look rather than guess at the cause.
+        text += (
+            "\nWARNING: the gateway's LLM was unavailable, so facts were stored verbatim "
+            "instead of extracted. Check the gateway's `llm:` config (its mimir.yaml, "
+            "MIMIR_CONFIG, or ~/.mimir/mimir.yaml) and its logs."
+        )
+    return text
 
 
 if __name__ == "__main__":
