@@ -50,6 +50,38 @@ _MIN_VERBATIM_LENGTH = 15  # skip "yes", "ok thanks" etc. in the offline path
 
 _FACT_OBJECT_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
+# ~4 chars/token, so 16000 chars is ~4000 tokens — a single-prompt extraction
+# past this size measurably skims: a 60k-char (32k-token) session run through
+# one prompt loses subtle one-line asides that the same content extracts fine
+# from when split into smaller windows. Below this, chunking is pure overhead
+# for no benefit, so short sessions (the common case) take the exact one-call
+# path this always used to, unchanged.
+_CHUNK_CHAR_THRESHOLD = 16000
+_CHUNK_OVERLAP_TURNS = 1
+
+
+def _chunk_turns(turns: list[dict]) -> list[list[dict]]:
+    """Splits into sequential windows under _CHUNK_CHAR_THRESHOLD chars each,
+    with a 1-turn overlap so a fact split across a boundary (a user statement
+    immediately followed by the assistant's acknowledgment of it) still has
+    both halves visible to at least one window. Whole-turn granularity only —
+    never splits a single turn's content — so every chunk transcript stays
+    well-formed dialogue the extraction prompt already knows how to read."""
+    chunks: list[list[dict]] = []
+    current: list[dict] = []
+    current_len = 0
+    for turn in turns:
+        turn_len = len(turn.get("content", ""))
+        if current and current_len + turn_len > _CHUNK_CHAR_THRESHOLD:
+            chunks.append(current)
+            current = current[-_CHUNK_OVERLAP_TURNS:] if _CHUNK_OVERLAP_TURNS else []
+            current_len = sum(len(t.get("content", "")) for t in current)
+        current.append(turn)
+        current_len += turn_len
+    if current:
+        chunks.append(current)
+    return chunks
+
 
 def _parse_facts_resilient(raw: str) -> list[dict]:
     """Parses each {...} fact object independently instead of json.loads-ing
@@ -85,40 +117,62 @@ def _verbatim_facts(turns: list[dict]) -> list[dict]:
     return facts
 
 
+def _extract_chunk(turns: list[dict]) -> list[dict]:
+    """One LLM round-trip over one chunk's turns -> parsed, filtered fact
+    dicts. Raises the same exceptions extract_facts already treats as
+    'take the offline path' — chunking must not introduce a new failure
+    mode, only more calls of the existing one."""
+    transcript = "\n".join(f"{t.get('role', 'user')}: {t['content']}" for t in turns)
+    # 8000 not 2000: 2000 was set when the only thing competing for the
+    # budget was the answer itself. It still truncated — measured on a
+    # 60k-char session, thinking-disabled extraction hit the 2000 cap at
+    # 32 facts and ran to a natural stop at 44 when given room. Facts are
+    # ~60 tokens each, so a dense session legitimately needs several
+    # thousand tokens of output and truncation costs whole facts, not
+    # formatting.
+    raw = chat(_L1_PROMPT.format(transcript=transcript), max_tokens=8000)
+    parsed = _parse_facts_resilient(raw)
+    facts = []
+    for item in parsed:
+        content = str(item.get("content", "")).strip()
+        fact_type = str(item.get("type", "episodic")).strip()
+        if not content or fact_type not in _VALID_TYPES:
+            continue
+        priority = int(item.get("priority", 50))
+        if priority < settings.extraction.min_priority:
+            continue
+        facts.append(
+            {
+                "content": content,
+                "type": fact_type,
+                "priority": priority,
+                "scene_name": str(item.get("scene_name", "")).strip()[:60],
+                "extraction": "llm",
+            }
+        )
+    return facts
+
+
 def extract_facts(turns: list[dict]) -> tuple[list[dict], str]:
     """-> (facts, mode) where mode is 'llm' or 'verbatim'. Facts below
-    extraction.min_priority are discarded (spec: immediately, at the source)."""
-    transcript = "\n".join(f"{t.get('role', 'user')}: {t['content']}" for t in turns)
+    extraction.min_priority are discarded (spec: immediately, at the source).
+
+    Sessions under _CHUNK_CHAR_THRESHOLD take a single LLM call, exactly as
+    before. Longer sessions (long personas, 32k-context benchmarks) are split
+    into overlapping windows first — a single prompt over a long transcript
+    measurably skims past one-line asides (a date, a name, a passing
+    disclosure) that the same content extracts cleanly when the model only
+    has to read a few thousand tokens at a time. Any chunk's failure falls
+    through to the same whole-session verbatim fallback as the single-call
+    path — an LLM outage doesn't care how the input was split."""
+    full_transcript = "\n".join(f"{t.get('role', 'user')}: {t['content']}" for t in turns)
+    chunks = _chunk_turns(turns) if len(full_transcript) > _CHUNK_CHAR_THRESHOLD else [turns]
     try:
-        # 8000 not 2000: 2000 was set when the only thing competing for the
-        # budget was the answer itself. It still truncated — measured on a
-        # 60k-char session, thinking-disabled extraction hit the 2000 cap at
-        # 32 facts and ran to a natural stop at 44 when given room. Facts are
-        # ~60 tokens each, so a dense session legitimately needs several
-        # thousand tokens of output and truncation costs whole facts, not
-        # formatting.
-        raw = chat(_L1_PROMPT.format(transcript=transcript), max_tokens=8000)
-        parsed = _parse_facts_resilient(raw)
-        if not parsed:
+        facts: list[dict] = []
+        for chunk in chunks:
+            facts.extend(_extract_chunk(chunk))
+        if not facts:
             raise ValueError("no parseable fact objects in LLM output")
-        facts = []
-        for item in parsed:
-            content = str(item.get("content", "")).strip()
-            fact_type = str(item.get("type", "episodic")).strip()
-            if not content or fact_type not in _VALID_TYPES:
-                continue
-            priority = int(item.get("priority", 50))
-            if priority < settings.extraction.min_priority:
-                continue
-            facts.append(
-                {
-                    "content": content,
-                    "type": fact_type,
-                    "priority": priority,
-                    "scene_name": str(item.get("scene_name", "")).strip()[:60],
-                    "extraction": "llm",
-                }
-            )
         return facts[: settings.extraction.max_memories_per_session], "llm"
     except (LlmUnavailable, json.JSONDecodeError, ValueError, AttributeError, TypeError):
         return _verbatim_facts(turns)[: settings.extraction.max_memories_per_session], "verbatim"
