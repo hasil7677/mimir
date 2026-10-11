@@ -278,7 +278,7 @@ Sample-size caveat, stated plainly: n=143 means the 95% interval on any single a
 
 ```bash
 pip install -e ".[dev]"
-pytest              # 113 tests; Redis-backed and fastembed-backed ones auto-skip without a server/extra installed
+pytest              # 148 tests; Redis-backed and fastembed-backed ones auto-skip without a server/extra installed
 ```
 
 CI runs the suite on Python 3.11–3.13, on both Ubuntu and Windows: the Windows leg is not decorative, it's what caught a real timezone bug during development.
